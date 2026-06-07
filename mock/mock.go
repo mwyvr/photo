@@ -242,14 +242,15 @@ func (e *EXIFExtractor) Extract(ctx context.Context, path string) (*photo.EXIFDa
 	if e.ExtractFn != nil {
 		return e.ExtractFn(ctx, path)
 	}
-	return &photo.EXIFData{}, nil
+	// Default: return a minimal valid JPEG so shouldSkip passes in tests.
+	return &photo.EXIFData{FileType: "JPEG", MIMEType: "image/jpeg"}, nil
 }
 
 func (e *EXIFExtractor) ExtractReader(ctx context.Context, r io.Reader, filename string) (*photo.EXIFData, error) {
 	if e.ExtractReaderFn != nil {
 		return e.ExtractReaderFn(ctx, r, filename)
 	}
-	return &photo.EXIFData{}, nil
+	return &photo.EXIFData{FileType: "JPEG", MIMEType: "image/jpeg"}, nil
 }
 
 // --- Geocoder ---------------------------------------------------------------

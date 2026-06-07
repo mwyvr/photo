@@ -49,6 +49,14 @@ type Photo struct {
 	// Full exiftool JSON output, stored as a blob. Excluded from API responses.
 	EXIFRaw string `json:"-"`
 
+	// IsRaw is true when the file is a camera RAW format (NEF, CR2, ARW, etc.)
+	// rather than a rendered image (JPEG, PNG, HEIC).
+	IsRaw bool `json:"isRaw"`
+
+	// RawPartnerID points to the RAW (or JPEG) counterpart of this photo when
+	// a camera produces RAW+JPEG pairs. Unpopulated at MVP; reserved for future use.
+	RawPartnerID *kid.ID `json:"rawPartnerId,omitempty"`
+
 	// User-applied metadata.
 	Tags        []*Tag `json:"tags,omitempty"`
 	Description string `json:"description"`
@@ -101,6 +109,10 @@ type PhotoFilter struct {
 	// Tags: all listed tags must be present (AND semantics).
 	Tags []string
 
+	// IsRaw filters to RAW-only (true) or non-RAW only (false).
+	// Nil means no filter — return both.
+	IsRaw *bool
+
 	Offset int
 	Limit  int
 }
@@ -117,6 +129,10 @@ type ImportOptions struct {
 
 	// UserID is the owner of the imported photo. Required.
 	UserID kid.ID
+
+	// RawOnly skips non-RAW image files (JPEG, PNG, HEIC, etc.) during import.
+	// Has no effect on files that are not images at all; those are always skipped.
+	RawOnly bool
 }
 
 // ImportResult describes the outcome of importing a single file.

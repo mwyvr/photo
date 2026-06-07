@@ -14,8 +14,9 @@ import (
 func runAdd(ctx context.Context, c *client, cfg *Config, args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "show what would be imported without uploading")
+	rawOnly := fs.Bool("raw-only", false, "skip non-RAW images (JPEG, PNG, HEIC, etc.)")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `Usage: photo add [--dry-run] <path>
+		fmt.Fprint(os.Stderr, `Usage: photo add [--dry-run] [--raw-only] <path>
 
 Import a photo file or a directory tree. Directories are scanned recursively.
 Files are uploaded to the photod server via multipart POST.
@@ -68,7 +69,7 @@ Flags:
 			continue
 		}
 
-		ph, err := c.uploadPhoto(ctx, p)
+		ph, err := c.uploadPhoto(ctx, p, *rawOnly)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  error  %-40s %v\n", base, err)
 			errored++

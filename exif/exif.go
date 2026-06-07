@@ -24,7 +24,48 @@ import (
 	"github.com/mwyvr/photo"
 )
 
-// knownTimeLayouts are the EXIF datetime formats exiftool may return.
+// rawFileTypes is the set of exiftool FileType values that represent camera
+// RAW formats. These are matched case-insensitively against the FileType tag.
+// Source: https://exiftool.org/supported_extensions.html
+var rawFileTypes = map[string]struct{}{
+	"3FR": {}, // Hasselblad
+	"ARW": {}, // Sony
+	"CR2": {}, // Canon
+	"CR3": {}, // Canon
+	"CRW": {}, // Canon (older)
+	"DCR": {}, // Kodak
+	"DNG": {}, // Adobe / Leica / various
+	"ERF": {}, // Epson
+	"FFF": {}, // Hasselblad
+	"GPR": {}, // GoPro
+	"IIQ": {}, // Phase One
+	"K25": {}, // Kodak
+	"KDC": {}, // Kodak
+	"MEF": {}, // Mamiya
+	"MOS": {}, // Leaf
+	"MRW": {}, // Minolta
+	"NEF": {}, // Nikon
+	"NRW": {}, // Nikon (compact)
+	"ORF": {}, // Olympus
+	"PEF": {}, // Pentax
+	"PTX": {}, // Pentax
+	"RAF": {}, // Fujifilm
+	"RAW": {}, // Leica / Panasonic
+	"RW2": {}, // Panasonic
+	"RWL": {}, // Leica
+	"SR2": {}, // Sony
+	"SRF": {}, // Sony
+	"SRW": {}, // Samsung
+	"X3F": {}, // Sigma
+}
+
+// isRawFileType returns true if the given exiftool FileType value is a RAW format.
+func isRawFileType(fileType string) bool {
+	_, ok := rawFileTypes[strings.ToUpper(fileType)]
+	return ok
+}
+
+
 // We try each in order until one parses.
 var knownTimeLayouts = []string{
 	"2006:01:02 15:04:05",         // standard EXIF
@@ -123,6 +164,9 @@ func (e *Extractor) Extract(ctx context.Context, path string) (*photo.EXIFData, 
 	tags := raw[0]
 
 	data := &photo.EXIFData{}
+	data.FileType = stringTag(tags, "FileType")
+	data.MIMEType = stringTag(tags, "MIMEType")
+	data.IsRaw = isRawFileType(data.FileType)
 	data.Make = stringTag(tags, "Make")
 	data.Model = stringTag(tags, "Model")
 	data.LensModel = firstString(tags, "LensModel", "LensID", "Lens")

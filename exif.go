@@ -8,6 +8,18 @@ import (
 
 // EXIFData holds metadata extracted from a photo file by EXIFExtractor.
 type EXIFData struct {
+	// FileType is exiftool's detected file type, derived from file content
+	// rather than extension. Examples: "JPEG", "NEF", "CR2", "DNG", "PNG".
+	// Empty if exiftool could not identify the file.
+	FileType string
+
+	// MIMEType is the MIME type reported by exiftool, e.g. "image/jpeg".
+	// Used to confirm the file is an image before importing.
+	MIMEType string
+
+	// IsRaw is true when FileType is a known camera RAW format.
+	IsRaw bool
+
 	Make         string
 	Model        string
 	LensModel    string
@@ -18,6 +30,7 @@ type EXIFData struct {
 	GPSLat       *float64
 	GPSLon       *float64
 	CapturedAt   *time.Time
+
 	// Raw holds the complete exiftool JSON output for the blob column.
 	Raw string
 }

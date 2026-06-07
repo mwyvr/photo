@@ -78,13 +78,6 @@ func New(
 func (imp *Importer) ImportFile(ctx context.Context, srcPath string, opts photo.ImportOptions) photo.ImportResult {
 	result := photo.ImportResult{SourcePath: srcPath}
 
-	ext := strings.ToLower(filepath.Ext(srcPath))
-	if _, ok := SupportedExtensions[ext]; !ok {
-		result.Skipped = true
-		result.SkipReason = fmt.Sprintf("unsupported file type %q", ext)
-		return result
-	}
-
 	hash, err := hashFile(srcPath)
 	if err != nil {
 		result.Err = fmt.Errorf("hash %q: %w", srcPath, err)
@@ -97,12 +90,19 @@ func (imp *Importer) ImportFile(ctx context.Context, srcPath string, opts photo.
 		return result
 	}
 
+	if skip, reason := shouldSkip(exifData, opts); skip {
+		result.Skipped = true
+		result.SkipReason = reason
+		return result
+	}
+
 	fileInfo, err := os.Stat(srcPath)
 	if err != nil {
 		result.Err = fmt.Errorf("stat %q: %w", srcPath, err)
 		return result
 	}
 
+	ext := strings.ToLower(filepath.Ext(srcPath))
 	return imp.runPipeline(ctx, pipelineInput{
 		filename: filepath.Base(srcPath),
 		ext:      ext,
@@ -119,13 +119,6 @@ func (imp *Importer) ImportFile(ctx context.Context, srcPath string, opts photo.
 func (imp *Importer) ImportReader(ctx context.Context, r io.Reader, filename string, opts photo.ImportOptions) photo.ImportResult {
 	result := photo.ImportResult{SourcePath: filename}
 
-	ext := strings.ToLower(filepath.Ext(filename))
-	if _, ok := SupportedExtensions[ext]; !ok {
-		result.Skipped = true
-		result.SkipReason = fmt.Sprintf("unsupported file type %q", ext)
-		return result
-	}
-
 	data, err := io.ReadAll(r)
 	if err != nil {
 		result.Err = fmt.Errorf("read %q: %w", filename, err)
@@ -140,6 +133,13 @@ func (imp *Importer) ImportReader(ctx context.Context, r io.Reader, filename str
 		return result
 	}
 
+	if skip, reason := shouldSkip(exifData, opts); skip {
+		result.Skipped = true
+		result.SkipReason = reason
+		return result
+	}
+
+	ext := strings.ToLower(filepath.Ext(filename))
 	return imp.runPipeline(ctx, pipelineInput{
 		filename: filename,
 		ext:      ext,
@@ -152,7 +152,28 @@ func (imp *Importer) ImportReader(ctx context.Context, r io.Reader, filename str
 	}, opts)
 }
 
-// pipelineInput carries pre-processed data into runPipeline.
+// shouldSkip returns true and a reason string if the file should not be imported.
+// Called after EXIF extraction so decisions are based on actual file content.
+func shouldSkip(exif *photo.EXIFData, opts photo.ImportOptions) (bool, string) {
+	// Reject anything that isn't an image, using exiftool's MIME type.
+	// An empty MIMEType means exiftool couldn't identify the file at all.
+	if exif.MIMEType == "" || !strings.HasPrefix(exif.MIMEType, "image/") {
+		ft := exif.FileType
+		if ft == "" {
+			ft = "unknown"
+		}
+		return true, fmt.Sprintf("not an image file (type: %s)", ft)
+	}
+
+	// If --raw-only is set, skip rendered images (JPEG, PNG, HEIC, etc.).
+	if opts.RawOnly && !exif.IsRaw {
+		return true, fmt.Sprintf("skipping non-RAW image (type: %s)", exif.FileType)
+	}
+
+	return false, ""
+}
+
+
 type pipelineInput struct {
 	filename string
 	ext      string
@@ -199,8 +220,9 @@ func (imp *Importer) runPipeline(ctx context.Context, in pipelineInput, opts pho
 		Filename:      in.filename,
 		StoredPath:    relPath(imp.libraryRoot, destPath),
 		SHA256:        in.hash,
-		MIMEType:      mimeTypeForExt(in.ext),
+		MIMEType:      in.exif.MIMEType,
 		FileSizeBytes: in.size,
+		IsRaw:         in.exif.IsRaw,
 		CameraMake:    in.exif.Make,
 		CameraModel:   in.exif.Model,
 		LensModel:     in.exif.LensModel,

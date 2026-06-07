@@ -74,16 +74,17 @@ func (c *client) logout(ctx context.Context) error {
 // --- photos -----------------------------------------------------------------
 
 type photoJSON struct {
-	ID           string    `json:"id"`
-	Filename     string    `json:"filename"`
-	StoredPath   string    `json:"storedPath"`
-	MIMEType     string    `json:"mimeType"`
-	FileSizeBytes int64    `json:"fileSizeBytes"`
-	CameraModel  string    `json:"cameraModel"`
-	CapturedAt   *time.Time `json:"capturedAt"`
-	LocationName string    `json:"locationName"`
-	Tags         []tagJSON `json:"tags"`
-	Description  string    `json:"description"`
+	ID            string     `json:"id"`
+	Filename      string     `json:"filename"`
+	StoredPath    string     `json:"storedPath"`
+	MIMEType      string     `json:"mimeType"`
+	FileSizeBytes int64      `json:"fileSizeBytes"`
+	CameraModel   string     `json:"cameraModel"`
+	CapturedAt    *time.Time `json:"capturedAt"`
+	LocationName  string     `json:"locationName"`
+	IsRaw         bool       `json:"isRaw"`
+	Tags          []tagJSON  `json:"tags"`
+	Description   string     `json:"description"`
 }
 
 type tagJSON struct {
@@ -104,6 +105,7 @@ type searchParams struct {
 	After    string
 	Before   string
 	Tags     []string
+	RawOnly  bool
 	Limit    int
 	Offset   int
 }
@@ -121,6 +123,9 @@ func (c *client) listPhotos(ctx context.Context, p searchParams) (*listPhotosRes
 	}
 	for _, t := range p.Tags {
 		q.Add("tag", t)
+	}
+	if p.RawOnly {
+		q.Set("raw_only", "true")
 	}
 	if p.Limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", p.Limit))
@@ -141,7 +146,7 @@ func (c *client) listPhotos(ctx context.Context, p searchParams) (*listPhotosRes
 	return &resp, nil
 }
 
-func (c *client) uploadPhoto(ctx context.Context, filePath string) (*photoJSON, error) {
+func (c *client) uploadPhoto(ctx context.Context, filePath string, rawOnly bool) (*photoJSON, error) {
 	f, err := openFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("open %q: %w", filePath, err)
@@ -159,8 +164,13 @@ func (c *client) uploadPhoto(ctx context.Context, filePath string) (*photoJSON, 
 	}
 	mw.Close()
 
+	uploadURL := c.baseURL + "/api/v1/photos"
+	if rawOnly {
+		uploadURL += "?raw_only=true"
+	}
+
 	req, err := http.NewRequestWithContext(ctx,
-		http.MethodPost, c.baseURL+"/api/v1/photos", &body)
+		http.MethodPost, uploadURL, &body)
 	if err != nil {
 		return nil, err
 	}

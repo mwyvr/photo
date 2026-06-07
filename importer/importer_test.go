@@ -3,6 +3,7 @@ package importer_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,8 @@ func TestImportFile_Success(t *testing.T) {
 	exifMock := &mock.EXIFExtractor{
 		ExtractFn: func(_ context.Context, _ string) (*photo.EXIFData, error) {
 			return &photo.EXIFData{
+				FileType:   "JPEG",
+				MIMEType:   "image/jpeg",
 				Make:       "Canon",
 				Model:      "EOS R5",
 				CapturedAt: &capturedAt,
@@ -83,7 +86,13 @@ func TestImportFile_Success(t *testing.T) {
 }
 
 func TestImportFile_UnsupportedExtension(t *testing.T) {
-	imp := importer.New(mock.NewPhotoService(), &mock.EXIFExtractor{}, nil, t.TempDir())
+	// Simulate what exiftool returns for a PDF: a non-image MIME type.
+	exifMock := &mock.EXIFExtractor{
+		ExtractFn: func(_ context.Context, _ string) (*photo.EXIFData, error) {
+			return &photo.EXIFData{FileType: "PDF", MIMEType: "application/pdf"}, nil
+		},
+	}
+	imp := importer.New(mock.NewPhotoService(), exifMock, nil, t.TempDir())
 	srcPath := makeTestFile(t, "document.pdf", "not an image")
 	result := imp.ImportFile(context.Background(), srcPath, photo.ImportOptions{UserID: kid.New()})
 
@@ -185,8 +194,11 @@ func TestImportReader_Success(t *testing.T) {
 
 	capturedAt := time.Date(2024, 3, 10, 9, 0, 0, 0, time.UTC)
 	exifMock := &mock.EXIFExtractor{
-		ExtractFn: func(_ context.Context, _ string) (*photo.EXIFData, error) {
+		ExtractReaderFn: func(_ context.Context, _ io.Reader, _ string) (*photo.EXIFData, error) {
 			return &photo.EXIFData{
+				FileType:   "NEF",
+				MIMEType:   "image/x-nikon-nef",
+				IsRaw:      true,
 				Model:      "Nikon Z9",
 				CapturedAt: &capturedAt,
 			}, nil
@@ -224,10 +236,31 @@ func TestImportReader_Success(t *testing.T) {
 	}
 }
 
-func TestImportReader_UnsupportedExtension(t *testing.T) {
-	imp := importer.New(mock.NewPhotoService(), &mock.EXIFExtractor{}, nil, t.TempDir())
+func TestImportFile_RawOnly(t *testing.T) {
+	jpegMock := &mock.EXIFExtractor{
+		ExtractFn: func(_ context.Context, _ string) (*photo.EXIFData, error) {
+			return &photo.EXIFData{FileType: "JPEG", MIMEType: "image/jpeg", IsRaw: false}, nil
+		},
+	}
+	imp := importer.New(mock.NewPhotoService(), jpegMock, nil, t.TempDir())
+	srcPath := makeTestFile(t, "IMG_0001.jpg", "fake jpeg")
+	result := imp.ImportFile(context.Background(), srcPath, photo.ImportOptions{
+		UserID:  kid.New(),
+		RawOnly: true,
+	})
+	if !result.Skipped {
+		t.Fatal("expected JPEG to be skipped when RawOnly is set")
+	}
+}
+
+	exifMock := &mock.EXIFExtractor{
+		ExtractReaderFn: func(_ context.Context, _ io.Reader, _ string) (*photo.EXIFData, error) {
+			return &photo.EXIFData{FileType: "PDF", MIMEType: "application/pdf"}, nil
+		},
+	}
+	imp := importer.New(mock.NewPhotoService(), exifMock, nil, t.TempDir())
 	result := imp.ImportReader(context.Background(), bytes.NewReader([]byte("data")), "file.pdf", photo.ImportOptions{UserID: kid.New()})
 	if !result.Skipped {
-		t.Fatal("expected unsupported extension to be skipped")
+		t.Fatal("expected non-image file to be skipped")
 	}
 }

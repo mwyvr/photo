@@ -139,6 +139,10 @@ func findPhotos(ctx context.Context, tx *Tx, filter photo.PhotoFilter) ([]*photo
 		where = append(where, "LOWER(location_name) LIKE '%' || LOWER(?) || '%'")
 		args = append(args, *v)
 	}
+	if v := filter.IsRaw; v != nil {
+		where = append(where, "is_raw = ?")
+		args = append(args, boolToInt(*v))
+	}
 	for _, tag := range filter.Tags {
 		where = append(where, `id IN (
 			SELECT pt.photo_id FROM photo_tags pt
@@ -188,12 +192,14 @@ func createPhoto(ctx context.Context, tx *Tx, p *photo.Photo) error {
 			camera_make, camera_model, lens_model, focal_length,
 			aperture, shutter_speed, iso, gps_lat, gps_lon,
 			captured_at, location_name, exif_raw, description,
+			is_raw, raw_partner_id,
 			created_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.ID, p.UserID, p.Filename, p.StoredPath, p.SHA256, p.MIMEType, p.FileSizeBytes,
 		p.CameraMake, p.CameraModel, p.LensModel, p.FocalLength,
 		p.Aperture, p.ShutterSpeed, nullInt(p.ISO), p.GPSLat, p.GPSLon,
 		nullTimeStr(p.CapturedAt), p.LocationName, p.EXIFRaw, p.Description,
+		boolToInt(p.IsRaw), p.RawPartnerID,
 		tx.nowStr(), tx.nowStr(),
 	)
 	return FormatError(err)
@@ -224,6 +230,7 @@ const photoSelectCols = `
 	       camera_make, camera_model, lens_model, focal_length,
 	       aperture, shutter_speed, iso, gps_lat, gps_lon,
 	       captured_at, location_name, exif_raw, description,
+	       is_raw, raw_partner_id,
 	       created_at, updated_at
 	FROM photos`
 
@@ -238,12 +245,15 @@ func scanPhoto(s photoScanner) (*photo.Photo, error) {
 	var iso sql.NullInt64
 	var gpsLat, gpsLon sql.NullFloat64
 	var exifRaw sql.NullString
+	var isRaw int
+	var rawPartnerID sql.NullString
 
 	err := s.Scan(
 		&p.ID, &p.UserID, &p.Filename, &p.StoredPath, &p.SHA256, &p.MIMEType, &p.FileSizeBytes,
 		&p.CameraMake, &p.CameraModel, &p.LensModel, &p.FocalLength,
 		&p.Aperture, &p.ShutterSpeed, &iso, &gpsLat, &gpsLon,
 		&capturedAt, &p.LocationName, &exifRaw, &p.Description,
+		&isRaw, &rawPartnerID,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -265,6 +275,13 @@ func scanPhoto(s photoScanner) (*photo.Photo, error) {
 	if exifRaw.Valid {
 		p.EXIFRaw = exifRaw.String
 	}
+	p.IsRaw = isRaw == 1
+	if rawPartnerID.Valid {
+		id, err := kid.FromString(rawPartnerID.String)
+		if err == nil {
+			p.RawPartnerID = &id
+		}
+	}
 	p.CreatedAt = createdAt.Time()
 	p.UpdatedAt = updatedAt.Time()
 	return &p, nil
@@ -275,6 +292,13 @@ func nullInt(v int) interface{} {
 		return nil
 	}
 	return v
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func nullTimeStr(t *time.Time) interface{} {

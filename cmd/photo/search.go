@@ -17,6 +17,7 @@ func runSearch(ctx context.Context, c *client, args []string) error {
 	location := fs.String("location", "", "filter by city or country (substring match)")
 	after    := fs.String("after", "", "only photos taken on or after YYYY-MM-DD")
 	before   := fs.String("before", "", "only photos taken on or before YYYY-MM-DD")
+	rawOnly  := fs.Bool("raw", false, "show only RAW images")
 	limit    := fs.Int("limit", 50, "maximum results")
 	offset   := fs.Int("offset", 0, "skip this many results")
 
@@ -41,6 +42,7 @@ Flags:
 		After:    *after,
 		Before:   *before,
 		Tags:     tags,
+		RawOnly:  *rawOnly,
 		Limit:    *limit,
 		Offset:   *offset,
 	})
@@ -54,12 +56,16 @@ Flags:
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tDate\tCamera\tLocation\tTags")
-	fmt.Fprintln(w, "──\t────\t──────\t────────\t────")
+	fmt.Fprintln(w, "ID\tDate\tRAW\tCamera\tLocation\tTags")
+	fmt.Fprintln(w, "──\t────\t───\t──────\t────────\t────")
 	for _, p := range resp.Photos {
 		date := "unknown"
 		if p.CapturedAt != nil {
 			date = p.CapturedAt.Format("2006-01-02")
+		}
+		raw := "—"
+		if p.IsRaw {
+			raw = "✓"
 		}
 		camera := orDash(p.CameraModel)
 		location := orDash(p.LocationName)
@@ -68,7 +74,7 @@ Flags:
 			tagNames = append(tagNames, t.Name)
 		}
 		tagStr := orDash(strings.Join(tagNames, ", "))
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", p.ID, date, camera, location, tagStr)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", p.ID, date, raw, camera, location, tagStr)
 	}
 	w.Flush()
 

@@ -18,6 +18,10 @@ func (s *Server) handleListPhotos(w http.ResponseWriter, r *http.Request) {
 		Limit:  50,
 	}
 
+	if v := q.Get("raw_only"); v == "true" {
+		t := true
+		filter.IsRaw = &t
+	}
 	if v := q.Get("location"); v != "" {
 		filter.Location = &v
 	}
@@ -90,7 +94,8 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	opts := photo.ImportOptions{
-		UserID: userID,
+		UserID:  userID,
+		RawOnly: r.URL.Query().Get("raw_only") == "true",
 	}
 
 	result := s.Importer.ImportReader(r.Context(), file, header.Filename, opts)
@@ -99,7 +104,7 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result.Skipped {
-		respondError(w, photo.Errorf(photo.ECONFLICT, result.SkipReason))
+		respondError(w, photo.Errorf(photo.ECONFLICT, "%s", result.SkipReason))
 		return
 	}
 
