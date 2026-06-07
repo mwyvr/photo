@@ -240,10 +240,11 @@ func (imp *Importer) runPipeline(ctx context.Context, in pipelineInput, opts pho
 
 	if !opts.DryRun {
 		if err := imp.photoSvc.CreatePhoto(ctx, p); err != nil {
+			// Roll back the copied file regardless of error type.
+			_ = os.Remove(destPath)
 			if photo.ErrorCode(err) == photo.ECONFLICT {
 				result.Skipped = true
 				result.SkipReason = "duplicate (already in library)"
-				_ = os.Remove(destPath)
 				return result
 			}
 			result.Err = fmt.Errorf("save photo record: %w", err)
