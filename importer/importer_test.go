@@ -156,14 +156,30 @@ func TestImportDir_MultipleFiles(t *testing.T) {
 	files := []struct{ name string }{
 		{"photo1.jpg"},
 		{"photo2.cr2"},
-		{"readme.txt"}, // unsupported
+		{"readme.txt"}, // unsupported — not an image
 		{"photo3.heic"},
 	}
 	for _, f := range files {
 		os.WriteFile(filepath.Join(srcDir, f.name), []byte("content-"+f.name), 0o644)
 	}
 
-	imp := importer.New(mock.NewPhotoService(), &mock.EXIFExtractor{}, nil, libraryRoot)
+	// Mock extractor that returns appropriate MIME types based on extension.
+	exifMock := &mock.EXIFExtractor{
+		ExtractFn: func(_ context.Context, path string) (*photo.EXIFData, error) {
+			switch strings.ToLower(filepath.Ext(path)) {
+			case ".jpg", ".jpeg":
+				return &photo.EXIFData{FileType: "JPEG", MIMEType: "image/jpeg"}, nil
+			case ".cr2":
+				return &photo.EXIFData{FileType: "CR2", MIMEType: "image/x-canon-cr2", IsRaw: true}, nil
+			case ".heic":
+				return &photo.EXIFData{FileType: "HEIC", MIMEType: "image/heic"}, nil
+			default:
+				return &photo.EXIFData{FileType: "TXT", MIMEType: "text/plain"}, nil
+			}
+		},
+	}
+
+	imp := importer.New(mock.NewPhotoService(), exifMock, nil, libraryRoot)
 	opts := photo.ImportOptions{UserID: kid.New()}
 
 	results, err := importer.ImportDir(ctx, imp, srcDir, opts, nil)
@@ -253,6 +269,7 @@ func TestImportFile_RawOnly(t *testing.T) {
 	}
 }
 
+func TestImportReader_UnsupportedExtension(t *testing.T) {
 	exifMock := &mock.EXIFExtractor{
 		ExtractReaderFn: func(_ context.Context, _ io.Reader, _ string) (*photo.EXIFData, error) {
 			return &photo.EXIFData{FileType: "PDF", MIMEType: "application/pdf"}, nil
