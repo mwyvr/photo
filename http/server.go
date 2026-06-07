@@ -145,6 +145,9 @@ func respondError(w http.ResponseWriter, err error) {
 		status = http.StatusUnauthorized
 	case photo.EFORBIDDEN:
 		status = http.StatusForbidden
+	default:
+		// Log unexpected internal errors server-side; don't expose details to client.
+		log.Printf("internal error: %v", err)
 	}
 	respond(w, status, map[string]string{"error": msg, "code": code})
 }
