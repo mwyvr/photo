@@ -80,12 +80,21 @@ type photoJSON struct {
 	MIMEType      string     `json:"mimeType"`
 	FileType      string     `json:"fileType"`
 	FileSizeBytes int64      `json:"fileSizeBytes"`
+	CameraMake    string     `json:"cameraMake"`
 	CameraModel   string     `json:"cameraModel"`
+	LensModel     string     `json:"lensModel"`
+	FocalLength   string     `json:"focalLength"`
+	Aperture      string     `json:"aperture"`
+	ShutterSpeed  string     `json:"shutterSpeed"`
+	ISO           int        `json:"iso"`
+	GPSLat        *float64   `json:"gpsLat,omitempty"`
+	GPSLon        *float64   `json:"gpsLon,omitempty"`
 	CapturedAt    *time.Time `json:"capturedAt"`
 	LocationName  string     `json:"locationName"`
 	IsRaw         bool       `json:"isRaw"`
 	Tags          []tagJSON  `json:"tags"`
 	Description   string     `json:"description"`
+	EXIFRaw       string     `json:"exifRaw,omitempty"`
 }
 
 type tagJSON struct {
@@ -203,6 +212,32 @@ func (c *client) getPhoto(ctx context.Context, id string) (*photoJSON, error) {
 	return &p, nil
 }
 
+func (c *client) updatePhoto(ctx context.Context, id, description string) (*photoJSON, error) {
+	body := map[string]string{"description": description}
+	var p photoJSON
+	if err := c.do(ctx, http.MethodPatch, "/api/v1/photos/"+id, body, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (c *client) regeocode(ctx context.Context, id, location string) (*photoJSON, error) {
+	var body interface{}
+	if location != "" {
+		body = map[string]string{"locationName": location}
+	}
+	var p photoJSON
+	if err := c.do(ctx, http.MethodPost, "/api/v1/photos/"+id+"/regeocode", body, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+
+func (c *client) deletePhoto(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/api/v1/photos/"+id, nil, nil)
+}
+
 func (c *client) attachTag(ctx context.Context, photoID, tagName string) error {
 	return c.do(ctx, http.MethodPost,
 		fmt.Sprintf("/api/v1/photos/%s/tags/%s", photoID, url.PathEscape(tagName)),
@@ -257,10 +292,17 @@ func (c *client) do(ctx context.Context, method, path string, body, out interfac
 	return nil
 }
 
+// errUnauthorized is returned by checkStatus when the server responds 401.
+// Callers can check for this to give a specific "please log in again" message.
+var errUnauthorized = fmt.Errorf("session expired or invalid — run 'photo login' to authenticate")
+
 // checkStatus returns a descriptive error if the HTTP response is not 2xx.
 func checkStatus(resp *http.Response) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return errUnauthorized
 	}
 	// Try to decode an API error body.
 	var apiErr struct {
@@ -273,7 +315,6 @@ func checkStatus(resp *http.Response) error {
 	return fmt.Errorf("server returned %d", resp.StatusCode)
 }
 
-// openFile is a thin wrapper around os.Open used by uploadPhoto.
 func openFile(path string) (*os.File, error) {
 	return os.Open(path)
 }

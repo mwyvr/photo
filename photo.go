@@ -49,8 +49,9 @@ type Photo struct {
 	// Example: "Tokyo, Japan"
 	LocationName string `json:"locationName,omitempty"`
 
-	// Full exiftool JSON output, stored as a blob. Excluded from API responses.
-	EXIFRaw string `json:"-"`
+	// Full exiftool JSON output, stored as a blob.
+	// Included in single-photo API responses (photo show --exif); omitted from lists.
+	EXIFRaw string `json:"exifRaw,omitempty"`
 
 	// IsRaw is true when the file is a camera RAW format (NEF, CR2, ARW, etc.)
 	// rather than a rendered image (JPEG, PNG, HEIC).
@@ -122,7 +123,8 @@ type PhotoFilter struct {
 
 // PhotoUpdate carries mutable fields a caller may change after import.
 type PhotoUpdate struct {
-	Description *string
+	Description  *string
+	LocationName *string // set directly (manual) or from reverse geocoding
 }
 
 // ImportOptions configures a single file import.

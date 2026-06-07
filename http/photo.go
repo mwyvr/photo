@@ -2,7 +2,10 @@ package http
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -139,7 +142,6 @@ func (s *Server) handleUpdatePhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify ownership before applying the update.
 	existing, err := s.PhotoService.FindPhotoByID(r.Context(), id)
 	if err != nil {
 		respondError(w, err)
@@ -152,7 +154,8 @@ func (s *Server) handleUpdatePhoto(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Description *string `json:"description"`
+		Description  *string `json:"description"`
+		LocationName *string `json:"locationName"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondError(w, photo.Errorf(photo.EINVALID, "invalid request body"))
@@ -160,7 +163,69 @@ func (s *Server) handleUpdatePhoto(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updated, err := s.PhotoService.UpdatePhoto(r.Context(), id, photo.PhotoUpdate{
-		Description: body.Description,
+		Description:  body.Description,
+		LocationName: body.LocationName,
+	})
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	respond(w, http.StatusOK, updated)
+}
+
+// handleRegeocode reverse-geocodes a photo using its stored GPS coordinates,
+// or sets the location_name directly from a user-supplied value.
+//
+//	POST /api/v1/photos/:id/regeocode
+//	Body (optional): {"locationName": "Dawson Creek, Canada"}
+//
+// If locationName is provided it is stored directly; no Nominatim call is made.
+// If locationName is absent the photo's GPS coords are used; fails if none present.
+func (s *Server) handleRegeocode(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
+		return
+	}
+
+	p, err := s.PhotoService.FindPhotoByID(r.Context(), id)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	userID := userIDFromContext(r.Context())
+	if p.UserID != userID {
+		respondError(w, photo.Errorf(photo.EFORBIDDEN, "access denied"))
+		return
+	}
+
+	var body struct {
+		LocationName *string `json:"locationName"`
+	}
+	// Body is optional — ignore decode errors on empty body.
+	json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+
+	var locationName string
+
+	if body.LocationName != nil {
+		// Manual override — use directly.
+		locationName = *body.LocationName
+	} else {
+		// Automatic — reverse geocode from GPS coords.
+		if !p.HasGPS() {
+			respondError(w, photo.Errorf(photo.EINVALID,
+				"photo has no GPS data; provide a location manually with --location"))
+			return
+		}
+		loc, err := s.Geocoder.ReverseGeocode(r.Context(), *p.GPSLat, *p.GPSLon)
+		if err != nil {
+			respondError(w, err)
+			return
+		}
+		locationName = loc.DisplayName()
+	}
+
+	updated, err := s.PhotoService.UpdatePhoto(r.Context(), id, photo.PhotoUpdate{
+		LocationName: &locationName,
 	})
 	if err != nil {
 		respondError(w, err)
@@ -190,6 +255,14 @@ func (s *Server) handleDeletePhoto(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+
+	// Remove the file from disk after the DB record is gone.
+	// Log but don't fail the request if the file is already missing.
+	fullPath := filepath.Join(s.LibraryRoot, existing.StoredPath)
+	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("delete photo: remove file %q: %v", fullPath, err)
+	}
+
 	respond(w, http.StatusNoContent, nil)
 }
 

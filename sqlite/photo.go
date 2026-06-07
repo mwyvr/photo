@@ -81,9 +81,12 @@ func (s *PhotoService) UpdatePhoto(ctx context.Context, id kid.ID, upd photo.Pho
 	if v := upd.Description; v != nil {
 		p.Description = *v
 	}
+	if v := upd.LocationName; v != nil {
+		p.LocationName = *v
+	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE photos SET description = ?, updated_at = ? WHERE id = ?`,
-		p.Description, tx.nowStr(), id,
+		`UPDATE photos SET description = ?, location_name = ?, updated_at = ? WHERE id = ?`,
+		p.Description, p.LocationName, tx.nowStr(), id,
 	); err != nil {
 		return nil, fmt.Errorf("update photo: %w", err)
 	}

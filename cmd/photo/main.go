@@ -6,15 +6,19 @@
 //
 // Commands:
 //
-//	register  Create a new account
-//	login     Authenticate and store a session token
-//	logout    Invalidate the current session token
-//	add       Import a file or directory into the library
-//	search    Search photos by date, location, or tag
-//	tag       Attach a tag to a photo
-//	untag     Remove a tag from a photo
-//	show      Display details for a single photo
-//	config    View or update client configuration
+//	register   Create a new account
+//	login      Authenticate and store a session token
+//	logout     Invalidate the current session token
+//	add        Import a file or directory into the library
+//	delete     Delete a photo from the library
+//	update     Update photo description
+//	regeocode  Set or update a photo's location
+//	list       List all photos (alias for search)
+//	search     Search photos by date, location, or tag
+//	tag        Attach a tag to a photo
+//	untag      Remove a tag from a photo
+//	show       Display details for a single photo
+//	config     View or update client configuration
 package main
 
 import (
@@ -61,25 +65,41 @@ func run(ctx context.Context, args []string) error {
 
 	client := newClient(cfg.ServerURL, cfg.Token)
 
+	var cmdErr error
 	switch cmd {
 	case "logout":
-		return runLogout(ctx, client, cfg)
+		cmdErr = runLogout(ctx, client, cfg)
 	case "add":
-		return runAdd(ctx, client, cfg, rest)
-	case "search":
-		return runSearch(ctx, client, rest)
+		cmdErr = runAdd(ctx, client, cfg, rest)
+	case "delete":
+		cmdErr = runDelete(ctx, client, rest)
+	case "update":
+		cmdErr = runUpdate(ctx, client, rest)
+	case "regeocode":
+		cmdErr = runRegeocode(ctx, client, rest)
+	case "search", "list":
+		cmdErr = runSearch(ctx, client, rest)
 	case "tag":
-		return runTag(ctx, client, rest)
+		cmdErr = runTag(ctx, client, rest)
 	case "untag":
-		return runUntag(ctx, client, rest)
+		cmdErr = runUntag(ctx, client, rest)
 	case "show":
-		return runShow(ctx, client, rest)
+		cmdErr = runShow(ctx, client, rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %q\n\n", cmd)
 		printUsage()
 		os.Exit(1)
 		return nil
 	}
+
+	if cmdErr == errUnauthorized {
+		// Clear the stale token so the user isn't stuck.
+		cfg.Token = ""
+		cfg.Username = ""
+		_ = saveConfig(cfg)
+		return fmt.Errorf("session expired — run 'photo login' to authenticate")
+	}
+	return cmdErr
 }
 
 func printUsage() {
@@ -89,15 +109,19 @@ Usage:
   photo <command> [arguments]
 
 Commands:
-  register  Create a new account on the server
-  login     Authenticate and store a session token
-  logout    Invalidate the current session
-  add       Import a file or directory
-  search    Search photos by date, location, or tag
-  tag       Attach a tag to a photo
-  untag     Remove a tag from a photo
-  show      Display full details for a photo
-  config    View or update client configuration
+  register   Create a new account on the server
+  login      Authenticate and store a session token
+  logout     Invalidate the current session
+  add        Import a file or directory
+  delete     Delete a photo from the library
+  update     Update photo description
+  regeocode  Set or update a photo's location
+  list       List all photos (alias for search)
+  search     Search photos by date, location, or tag
+  tag        Attach a tag to a photo
+  untag      Remove a tag from a photo
+  show       Display full details for a photo
+  config     View or update client configuration
 
 Run 'photo <command> -help' for command-specific usage.
 `)

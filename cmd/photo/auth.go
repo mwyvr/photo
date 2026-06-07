@@ -110,8 +110,10 @@ The session token is stored in the config file.
 
 // runLogout handles 'photo logout'.
 func runLogout(ctx context.Context, c *client, cfg *Config) error {
-	if err := c.logout(ctx); err != nil {
-		// Log the error but clear the token locally regardless.
+	err := c.logout(ctx)
+	if err != nil && err != errUnauthorized {
+		// Log the error but clear the token locally regardless —
+		// the user's intent is to be logged out.
 		fmt.Fprintf(os.Stderr, "warning: server logout failed: %v\n", err)
 	}
 
