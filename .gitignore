@@ -6,6 +6,9 @@ bin/
 *.so
 *.dylib
 
+# Go
+go.sum
+
 # Test artifacts
 *.test
 coverage.out
