@@ -40,6 +40,7 @@ type Server struct {
 	PhotoService   photo.PhotoService
 	TagService     photo.TagService
 	Importer       photo.Importer
+	Geocoder       photo.Geocoder
 
 	// JWTSecret is the HMAC-SHA256 signing key for JWT tokens.
 	// Generated once at server startup and stored in the server config file.
@@ -82,12 +83,15 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("GET /api/v1/photos/{id}", s.requireAuth(s.handleGetPhoto))
 	s.router.HandleFunc("PATCH /api/v1/photos/{id}", s.requireAuth(s.handleUpdatePhoto))
 	s.router.HandleFunc("DELETE /api/v1/photos/{id}", s.requireAuth(s.handleDeletePhoto))
+	s.router.HandleFunc("POST /api/v1/photos/{id}/regeocode", s.requireAuth(s.handleRegeocode))
 
 	s.router.HandleFunc("POST /api/v1/photos/{id}/tags/{name}", s.requireAuth(s.handleAttachTag))
 	s.router.HandleFunc("DELETE /api/v1/photos/{id}/tags/{name}", s.requireAuth(s.handleDetachTag))
 }
 
 // ListenAndServe starts the HTTP server. It blocks until the context is done.
+// TLS termination is handled by a reverse proxy (Caddy, Mox, nginx, etc.)
+// running in front of photod; photod itself always speaks plain HTTP.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	go s.cleanupSessions(ctx)
 	go func() {

@@ -31,6 +31,21 @@ const (
 	minRequestInterval = time.Second
 )
 
+// cacheKey rounds lat/lon to 2 decimal places (~1.1km) and returns a
+// string key suitable for use in the cache map. This precision is more
+// than sufficient for city-level reverse geocoding: photos taken within
+// ~1km of each other will resolve to the same city anyway.
+func cacheKey(lat, lon float64) string {
+	return fmt.Sprintf("%.2f,%.2f", lat, lon)
+}
+
+// cacheEntry holds a cached geocode result. A nil location means the
+// coordinates resolved to no known place (ENOTFOUND), which is also cached
+// to avoid repeating failed lookups.
+type cacheEntry struct {
+	location *photo.Location // nil = ENOTFOUND
+}
+
 // NominatimGeocoder implements photo.Geocoder using the Nominatim API.
 type NominatimGeocoder struct {
 	// UserAgent is sent as the HTTP User-Agent header.
@@ -42,9 +57,10 @@ type NominatimGeocoder struct {
 	// Defaults to a client with a 10-second timeout if nil.
 	HTTPClient *http.Client
 
-	// mu and lastRequest enforce the 1 req/s rate limit.
+	// mu protects both the rate limiter and the cache.
 	mu          sync.Mutex
 	lastRequest time.Time
+	cache       map[string]cacheEntry
 }
 
 // NewNominatimGeocoder returns a new geocoder with sensible defaults.
@@ -55,6 +71,7 @@ func NewNominatimGeocoder(userAgent string) *NominatimGeocoder {
 		HTTPClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		cache: make(map[string]cacheEntry),
 	}
 }
 
@@ -69,6 +86,21 @@ func (g *NominatimGeocoder) ReverseGeocode(ctx context.Context, lat, lon float64
 			"geocoder: UserAgent must be set (Nominatim usage policy)")
 	}
 
+	key := cacheKey(lat, lon)
+
+	// Check the in-process cache before hitting the network.
+	g.mu.Lock()
+	if entry, ok := g.cache[key]; ok {
+		g.mu.Unlock()
+		if entry.location == nil {
+			return nil, photo.Errorf(photo.ENOTFOUND,
+				"geocoder: no place found for (%.6f, %.6f)", lat, lon)
+		}
+		return entry.location, nil
+	}
+	g.mu.Unlock()
+
+	// Not cached — enforce rate limit and fetch from Nominatim.
 	g.rateLimit()
 
 	params := url.Values{}
@@ -85,7 +117,7 @@ func (g *NominatimGeocoder) ReverseGeocode(ctx context.Context, lat, lon float64
 		return nil, photo.Errorf(photo.EINTERNAL, "geocoder: build request: %v", err)
 	}
 	req.Header.Set("User-Agent", g.UserAgent)
-	req.Header.Set("Accept-Language", "en") // request English place names
+	req.Header.Set("Accept-Language", "en")
 
 	resp, err := g.HTTPClient.Do(req)
 	if err != nil {
@@ -94,10 +126,12 @@ func (g *NominatimGeocoder) ReverseGeocode(ctx context.Context, lat, lon float64
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
+		g.store(key, nil)
 		return nil, photo.Errorf(photo.ENOTFOUND,
 			"geocoder: no place found for (%.6f, %.6f)", lat, lon)
 	}
 	if resp.StatusCode != http.StatusOK {
+		// Don't cache transient HTTP errors.
 		return nil, photo.Errorf(photo.EINTERNAL,
 			"geocoder: unexpected status %d for (%.6f, %.6f)", resp.StatusCode, lat, lon)
 	}
@@ -107,10 +141,9 @@ func (g *NominatimGeocoder) ReverseGeocode(ctx context.Context, lat, lon float64
 		return nil, photo.Errorf(photo.EINTERNAL, "geocoder: decode response: %v", err)
 	}
 
-	// Nominatim returns an error field in JSON for coords that resolve nowhere.
 	if result.Error != "" {
-		return nil, photo.Errorf(photo.ENOTFOUND,
-			"geocoder: %s", result.Error)
+		g.store(key, nil)
+		return nil, photo.Errorf(photo.ENOTFOUND, "geocoder: %s", result.Error)
 	}
 
 	loc := &photo.Location{
@@ -120,20 +153,29 @@ func (g *NominatimGeocoder) ReverseGeocode(ctx context.Context, lat, lon float64
 		CountryCode: strings.ToUpper(result.Address.CountryCode),
 	}
 
+	g.store(key, loc)
 	return loc, nil
 }
 
-// rateLimit blocks until it is safe to make the next Nominatim request,
-// enforcing the 1-request-per-second policy.
+// store writes a result to the cache under mu.
+func (g *NominatimGeocoder) store(key string, loc *photo.Location) {
+	g.mu.Lock()
+	g.cache[key] = cacheEntry{location: loc}
+	g.mu.Unlock()
+}
+
+// rateLimit blocks until it is safe to make the next Nominatim request.
+// The lock is released before sleeping so cached lookups are never blocked.
 func (g *NominatimGeocoder) rateLimit() {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-
 	elapsed := time.Since(g.lastRequest)
-	if elapsed < minRequestInterval {
-		time.Sleep(minRequestInterval - elapsed)
-	}
+	wait := minRequestInterval - elapsed
 	g.lastRequest = time.Now()
+	g.mu.Unlock()
+
+	if wait > 0 {
+		time.Sleep(wait)
+	}
 }
 
 // --- Nominatim JSON response types ------------------------------------------
