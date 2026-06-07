@@ -88,9 +88,12 @@ func run(ctx context.Context) error {
 	srv.PhotoService = photoSvc
 	srv.TagService = tagSvc
 	srv.Importer = imp
+	srv.Geocoder = geocoder
 	srv.JWTSecret = cfg.JWTSecret
 	srv.LibraryRoot = cfg.LibraryRoot
 
+	log.Printf("photod library: %s", cfg.LibraryRoot)
+	log.Printf("photod database: %s", cfg.DBPath())
 	return srv.ListenAndServe(ctx)
 }
 
@@ -146,6 +149,12 @@ func loadOrInitConfig(path string) (*ServerConfig, error) {
 	if cfg.Addr == "" {
 		cfg.Addr = "127.0.0.1:4040"
 	}
+
+	// Ensure directories exist even if the config predates them or they were removed.
+	if err := os.MkdirAll(filepath.Join(cfg.LibraryRoot, ".photo"), 0o755); err != nil {
+		return nil, fmt.Errorf("create library directory: %w", err)
+	}
+
 	return &cfg, nil
 }
 
