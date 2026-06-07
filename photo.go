@@ -24,6 +24,9 @@ type Photo struct {
 	// SHA-256 hex digest. Used for duplicate detection.
 	SHA256 string `json:"sha256"`
 
+	// FileType is exiftool's detected file type string, e.g. "JPEG", "NEF", "CR2".
+	// Derived from file content, not the filename extension.
+	FileType      string `json:"fileType"`
 	MIMEType      string `json:"mimeType"`
 	FileSizeBytes int64  `json:"fileSizeBytes"`
 

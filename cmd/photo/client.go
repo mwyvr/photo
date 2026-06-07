@@ -78,6 +78,7 @@ type photoJSON struct {
 	Filename      string     `json:"filename"`
 	StoredPath    string     `json:"storedPath"`
 	MIMEType      string     `json:"mimeType"`
+	FileType      string     `json:"fileType"`
 	FileSizeBytes int64      `json:"fileSizeBytes"`
 	CameraModel   string     `json:"cameraModel"`
 	CapturedAt    *time.Time `json:"capturedAt"`

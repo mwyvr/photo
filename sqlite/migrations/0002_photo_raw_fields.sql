@@ -5,3 +5,4 @@ ALTER TABLE photos ADD COLUMN is_raw        INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE photos ADD COLUMN raw_partner_id TEXT REFERENCES photos(id);
 
 CREATE INDEX idx_photos_is_raw ON photos (is_raw);
+ALTER TABLE photos ADD COLUMN file_type TEXT NOT NULL DEFAULT '';

@@ -220,6 +220,7 @@ func (imp *Importer) runPipeline(ctx context.Context, in pipelineInput, opts pho
 		Filename:      in.filename,
 		StoredPath:    relPath(imp.libraryRoot, destPath),
 		SHA256:        in.hash,
+		FileType:      in.exif.FileType,
 		MIMEType:      in.exif.MIMEType,
 		FileSizeBytes: in.size,
 		IsRaw:         in.exif.IsRaw,

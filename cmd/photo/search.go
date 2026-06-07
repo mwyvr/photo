@@ -56,13 +56,14 @@ Flags:
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tDate\tRAW\tCamera\tLocation\tTags")
-	fmt.Fprintln(w, "──\t────\t───\t──────\t────────\t────")
+	fmt.Fprintln(w, "ID\tDate\tType\tRAW\tCamera\tLocation\tTags")
+	fmt.Fprintln(w, "──\t────\t────\t───\t──────\t────────\t────")
 	for _, p := range resp.Photos {
 		date := "unknown"
 		if p.CapturedAt != nil {
 			date = p.CapturedAt.Format("2006-01-02")
 		}
+		fileType := orDash(p.FileType)
 		raw := "—"
 		if p.IsRaw {
 			raw = "✓"
@@ -74,7 +75,7 @@ Flags:
 			tagNames = append(tagNames, t.Name)
 		}
 		tagStr := orDash(strings.Join(tagNames, ", "))
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", p.ID, date, raw, camera, location, tagStr)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.ID, date, fileType, raw, camera, location, tagStr)
 	}
 	w.Flush()
 

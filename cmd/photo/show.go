@@ -33,7 +33,9 @@ Display full details for a single photo.
 	fmt.Fprintf(w, "ID:\t%s\n", p.ID)
 	fmt.Fprintf(w, "File:\t%s\n", p.Filename)
 	fmt.Fprintf(w, "Path:\t%s\n", p.StoredPath)
-	fmt.Fprintf(w, "Type:\t%s\n", p.MIMEType)
+	fmt.Fprintf(w, "Type:\t%s\n", orDash(p.FileType))
+	fmt.Fprintf(w, "MIME:\t%s\n", p.MIMEType)
+	fmt.Fprintf(w, "RAW:\t%v\n", p.IsRaw)
 	fmt.Fprintf(w, "Size:\t%s\n", formatBytes(p.FileSizeBytes))
 
 	fmt.Fprintln(w, "\n── Camera ───────────────────────────")

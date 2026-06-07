@@ -192,14 +192,14 @@ func createPhoto(ctx context.Context, tx *Tx, p *photo.Photo) error {
 			camera_make, camera_model, lens_model, focal_length,
 			aperture, shutter_speed, iso, gps_lat, gps_lon,
 			captured_at, location_name, exif_raw, description,
-			is_raw, raw_partner_id,
+			is_raw, raw_partner_id, file_type,
 			created_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.ID, p.UserID, p.Filename, p.StoredPath, p.SHA256, p.MIMEType, p.FileSizeBytes,
 		p.CameraMake, p.CameraModel, p.LensModel, p.FocalLength,
 		p.Aperture, p.ShutterSpeed, nullInt(p.ISO), p.GPSLat, p.GPSLon,
 		nullTimeStr(p.CapturedAt), p.LocationName, p.EXIFRaw, p.Description,
-		boolToInt(p.IsRaw), p.RawPartnerID,
+		boolToInt(p.IsRaw), p.RawPartnerID, p.FileType,
 		tx.nowStr(), tx.nowStr(),
 	)
 	return FormatError(err)
@@ -230,7 +230,7 @@ const photoSelectCols = `
 	       camera_make, camera_model, lens_model, focal_length,
 	       aperture, shutter_speed, iso, gps_lat, gps_lon,
 	       captured_at, location_name, exif_raw, description,
-	       is_raw, raw_partner_id,
+	       is_raw, raw_partner_id, file_type,
 	       created_at, updated_at
 	FROM photos`
 
@@ -247,13 +247,14 @@ func scanPhoto(s photoScanner) (*photo.Photo, error) {
 	var exifRaw sql.NullString
 	var isRaw int
 	var rawPartnerID sql.NullString
+	var fileType sql.NullString
 
 	err := s.Scan(
 		&p.ID, &p.UserID, &p.Filename, &p.StoredPath, &p.SHA256, &p.MIMEType, &p.FileSizeBytes,
 		&p.CameraMake, &p.CameraModel, &p.LensModel, &p.FocalLength,
 		&p.Aperture, &p.ShutterSpeed, &iso, &gpsLat, &gpsLon,
 		&capturedAt, &p.LocationName, &exifRaw, &p.Description,
-		&isRaw, &rawPartnerID,
+		&isRaw, &rawPartnerID, &fileType,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -281,6 +282,9 @@ func scanPhoto(s photoScanner) (*photo.Photo, error) {
 		if err == nil {
 			p.RawPartnerID = &id
 		}
+	}
+	if fileType.Valid {
+		p.FileType = fileType.String
 	}
 	p.CreatedAt = createdAt.Time()
 	p.UpdatedAt = updatedAt.Time()
