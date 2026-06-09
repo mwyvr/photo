@@ -12,6 +12,33 @@ import (
 	"github.com/mwyvr/photo"
 )
 
+// handlePhotoExists checks whether a photo with the given SHA-256 hash is
+// already in the library. Returns 200 with the photo ID if found, 404 if not.
+// Used by the CLI for pre-flight duplicate detection before uploading.
+func (s *Server) handlePhotoExists(w http.ResponseWriter, r *http.Request) {
+	sha256 := r.URL.Query().Get("sha256")
+	if sha256 == "" {
+		respondError(w, photo.Errorf(photo.EINVALID, "sha256 query parameter is required"))
+		return
+	}
+
+	userID := userIDFromContext(r.Context())
+	photos, _, err := s.PhotoService.FindPhotos(r.Context(), photo.PhotoFilter{
+		UserID: userID,
+		SHA256: &sha256,
+	})
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if len(photos) == 0 {
+		respondError(w, photo.Errorf(photo.ENOTFOUND, "photo not found"))
+		return
+	}
+	respond(w, http.StatusOK, map[string]string{"id": photos[0].ID.String()})
+}
+
+
 func (s *Server) handleListPhotos(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r.Context())
 	q := r.URL.Query()
@@ -96,9 +123,23 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// Determine published state:
+	// - If ?published= is explicitly set, use that value.
+	// - Otherwise apply server default — but RAW files are always unpublished.
+	var published bool
+	q := r.URL.Query()
+	if p := q.Get("published"); p != "" {
+		published = p == "true"
+	} else {
+		published = s.PublishDefault
+		// RAW default override is applied after import once we know IsRaw.
+		// Flag it for post-import correction.
+	}
+
 	opts := photo.ImportOptions{
-		UserID:  userID,
-		RawOnly: r.URL.Query().Get("raw_only") == "true",
+		UserID:    userID,
+		RawOnly:   q.Get("raw_only") == "true",
+		Published: published,
 	}
 
 	result := s.Importer.ImportReader(r.Context(), file, header.Filename, opts)
@@ -111,8 +152,46 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If publishDefault is true but the file turned out to be RAW, correct it.
+	// We can't know IsRaw before extraction, so we fix it after the fact.
+	if result.Photo.IsRaw && published && q.Get("published") == "" {
+		f := false
+		if _, err := s.PhotoService.UpdatePhoto(r.Context(), result.Photo.ID, photo.PhotoUpdate{
+			Published: &f,
+		}); err != nil {
+			log.Printf("correct RAW published flag for %s: %v", result.Photo.ID, err)
+		}
+		result.Photo.Published = false
+	}
+
 	respond(w, http.StatusCreated, result.Photo)
 }
+
+// handleServePhotoFile serves the raw image file for an authenticated user.
+// Used by the web UI detail page for private (unpublished) photos.
+// Ownership is enforced — users can only access their own photos.
+func (s *Server) handleServePhotoFile(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
+		return
+	}
+
+	p, err := s.PhotoService.FindPhotoByID(r.Context(), id)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+
+	userID := userIDFromContext(r.Context())
+	if p.UserID != userID {
+		respondError(w, photo.Errorf(photo.EFORBIDDEN, "access denied"))
+		return
+	}
+
+	fullPath := filepath.Join(s.LibraryRoot, p.StoredPath)
+	http.ServeFile(w, r, fullPath)
+}
+
 
 func (s *Server) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePathID(w, r, "id")
@@ -126,7 +205,6 @@ func (s *Server) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce ownership.
 	userID := userIDFromContext(r.Context())
 	if p.UserID != userID {
 		respondError(w, photo.Errorf(photo.EFORBIDDEN, "access denied"))

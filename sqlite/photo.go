@@ -84,9 +84,15 @@ func (s *PhotoService) UpdatePhoto(ctx context.Context, id kid.ID, upd photo.Pho
 	if v := upd.LocationName; v != nil {
 		p.LocationName = *v
 	}
+	if v := upd.Published; v != nil {
+		p.Published = *v
+	}
+	if v := upd.ThumbPath; v != nil {
+		p.ThumbPath = v
+	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE photos SET description = ?, location_name = ?, updated_at = ? WHERE id = ?`,
-		p.Description, p.LocationName, tx.nowStr(), id,
+		`UPDATE photos SET description = ?, location_name = ?, published = ?, thumb_path = ?, updated_at = ? WHERE id = ?`,
+		p.Description, p.LocationName, boolToInt(p.Published), p.ThumbPath, tx.nowStr(), id,
 	); err != nil {
 		return nil, fmt.Errorf("update photo: %w", err)
 	}
@@ -146,6 +152,14 @@ func findPhotos(ctx context.Context, tx *Tx, filter photo.PhotoFilter) ([]*photo
 		where = append(where, "is_raw = ?")
 		args = append(args, boolToInt(*v))
 	}
+	if v := filter.Published; v != nil {
+		where = append(where, "published = ?")
+		args = append(args, boolToInt(*v))
+	}
+	if v := filter.SHA256; v != nil {
+		where = append(where, "sha256 = ?")
+		args = append(args, *v)
+	}
 	for _, tag := range filter.Tags {
 		where = append(where, `id IN (
 			SELECT pt.photo_id FROM photo_tags pt
@@ -196,13 +210,15 @@ func createPhoto(ctx context.Context, tx *Tx, p *photo.Photo) error {
 			aperture, shutter_speed, iso, gps_lat, gps_lon,
 			captured_at, location_name, exif_raw, description,
 			is_raw, raw_partner_id, file_type,
+			published, thumb_path,
 			created_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.ID, p.UserID, p.Filename, p.StoredPath, p.SHA256, p.MIMEType, p.FileSizeBytes,
 		p.CameraMake, p.CameraModel, p.LensModel, p.FocalLength,
 		p.Aperture, p.ShutterSpeed, nullInt(p.ISO), p.GPSLat, p.GPSLon,
 		nullTimeStr(p.CapturedAt), p.LocationName, p.EXIFRaw, p.Description,
 		boolToInt(p.IsRaw), p.RawPartnerID, p.FileType,
+		boolToInt(p.Published), p.ThumbPath,
 		tx.nowStr(), tx.nowStr(),
 	)
 	return FormatError(err)
@@ -234,6 +250,7 @@ const photoSelectCols = `
 	       aperture, shutter_speed, iso, gps_lat, gps_lon,
 	       captured_at, location_name, exif_raw, description,
 	       is_raw, raw_partner_id, file_type,
+	       published, thumb_path,
 	       created_at, updated_at
 	FROM photos`
 
@@ -249,8 +266,10 @@ func scanPhoto(s photoScanner) (*photo.Photo, error) {
 	var gpsLat, gpsLon sql.NullFloat64
 	var exifRaw sql.NullString
 	var isRaw int
+	var published int
 	var rawPartnerID sql.NullString
 	var fileType sql.NullString
+	var thumbPath sql.NullString
 
 	err := s.Scan(
 		&p.ID, &p.UserID, &p.Filename, &p.StoredPath, &p.SHA256, &p.MIMEType, &p.FileSizeBytes,
@@ -258,6 +277,7 @@ func scanPhoto(s photoScanner) (*photo.Photo, error) {
 		&p.Aperture, &p.ShutterSpeed, &iso, &gpsLat, &gpsLon,
 		&capturedAt, &p.LocationName, &exifRaw, &p.Description,
 		&isRaw, &rawPartnerID, &fileType,
+		&published, &thumbPath,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -280,6 +300,7 @@ func scanPhoto(s photoScanner) (*photo.Photo, error) {
 		p.EXIFRaw = exifRaw.String
 	}
 	p.IsRaw = isRaw == 1
+	p.Published = published == 1
 	if rawPartnerID.Valid {
 		id, err := kid.FromString(rawPartnerID.String)
 		if err == nil {
@@ -288,6 +309,9 @@ func scanPhoto(s photoScanner) (*photo.Photo, error) {
 	}
 	if fileType.Valid {
 		p.FileType = fileType.String
+	}
+	if thumbPath.Valid {
+		p.ThumbPath = &thumbPath.String
 	}
 	p.CreatedAt = createdAt.Time()
 	p.UpdatedAt = updatedAt.Time()

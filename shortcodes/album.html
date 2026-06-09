@@ -1,0 +1,49 @@
+{{/*
+  album shortcode — links to an album page in the photo library.
+
+  Usage:
+    {{< album id="06bq8abc123defgh" >}}
+    {{< album id="06bq8abc123defgh" title="France 2024" >}}
+    {{< album id="06bq8abc123defgh" title="France 2024" thumb="true" >}}
+
+  Parameters:
+    id     (required) kid ID of the album
+    title  (optional) link text; defaults to "View album"
+    thumb  (optional) "true" shows the album cover thumbnail above the link
+
+  Set site.Params.photoServer in your Hugo config to your photo server base URL:
+    [params]
+    photoServer = "https://photos.yourdomain.com"
+*/}}
+
+{{- $id    := .Get "id" -}}
+{{- $title := .Get "title" | default "View album" -}}
+{{- $thumb := .Get "thumb" | default "false" -}}
+
+{{- if not $id -}}
+  {{ errorf "album shortcode: id parameter is required" }}
+{{- end -}}
+
+{{- $base := "" -}}
+{{- with site.Params.photoServer -}}
+  {{- $base = . -}}
+{{- else -}}
+  {{- $base = "https://photos.example.com" -}}
+{{- end -}}
+
+{{- $albumURL := printf "%s/albums/%s" $base $id -}}
+{{- $coverURL := printf "%s/p/%s/thumb" $base $id -}}
+
+<span class="album-embed">
+  {{- if eq $thumb "true" }}
+  <a href="{{ $albumURL }}" target="_blank" rel="noopener" class="album-embed-link">
+    <img src="{{ $coverURL }}"
+         alt="{{ $title }}"
+         loading="lazy"
+         class="album-embed-thumb">
+    <span>{{ $title }}</span>
+  </a>
+  {{- else }}
+  <a href="{{ $albumURL }}" target="_blank" rel="noopener">{{ $title }}</a>
+  {{- end }}
+</span>

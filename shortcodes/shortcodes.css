@@ -1,0 +1,38 @@
+/* photo shortcode */
+.photo-embed {
+  margin-block: 1.5rem;
+}
+
+.photo-embed img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.photo-embed figcaption {
+  margin-block-start: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-text-muted, #666);
+  font-style: italic;
+}
+
+/* album shortcode */
+.album-embed {
+  display: inline-block;
+}
+
+.album-embed-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+}
+
+.album-embed-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+}

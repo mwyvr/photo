@@ -1,0 +1,61 @@
+{{/*
+  photo shortcode — embeds a single photo from the photo library.
+
+  Usage:
+    {{< photo id="06bq7xhnr03mlz6r" >}}
+    {{< photo id="06bq7xhnr03mlz6r" caption="Sunrise over Dawson Creek" >}}
+    {{< photo id="06bq7xhnr03mlz6r" size="thumb" >}}
+    {{< photo id="06bq7xhnr03mlz6r" link="false" >}}
+
+  Parameters:
+    id       (required) kid ID of the photo
+    caption  (optional) figure caption; falls back to empty
+    size     (optional) "full" (default) or "thumb"
+    link     (optional) "true" (default) wraps image in a link to the detail page
+             set "false" to render image only
+
+  The PHOTO_SERVER environment variable or the Hugo param `photoServer`
+  sets the base URL. Falls back to https://photos.example.com if neither is set.
+*/}}
+
+{{- $id      := .Get "id" -}}
+{{- $caption := .Get "caption" -}}
+{{- $size    := .Get "size" | default "full" -}}
+{{- $link    := .Get "link" | default "true" -}}
+
+{{- if not $id -}}
+  {{ errorf "photo shortcode: id parameter is required" }}
+{{- end -}}
+
+{{- $base := "" -}}
+{{- with site.Params.photoServer -}}
+  {{- $base = . -}}
+{{- else -}}
+  {{- $base = "https://photos.example.com" -}}
+{{- end -}}
+
+{{- $imgURL    := printf "%s/p/%s" $base $id -}}
+{{- $thumbURL  := printf "%s/p/%s/thumb" $base $id -}}
+{{- $detailURL := printf "%s/photo/%s" $base $id -}}
+
+{{- $src := $imgURL -}}
+{{- if eq $size "thumb" -}}
+  {{- $src = $thumbURL -}}
+{{- end -}}
+
+<figure class="photo-embed">
+  {{- if eq $link "true" }}
+  <a href="{{ $detailURL }}" target="_blank" rel="noopener">
+    <img src="{{ $src }}"
+         alt="{{ $caption | default (printf "Photo %s" $id) }}"
+         loading="lazy">
+  </a>
+  {{- else }}
+  <img src="{{ $src }}"
+       alt="{{ $caption | default (printf "Photo %s" $id) }}"
+       loading="lazy">
+  {{- end }}
+  {{- with $caption }}
+  <figcaption>{{ . }}</figcaption>
+  {{- end }}
+</figure>

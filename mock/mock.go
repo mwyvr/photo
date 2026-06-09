@@ -8,6 +8,7 @@ package mock
 import (
 	"context"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -269,4 +270,202 @@ func (g *Geocoder) ReverseGeocode(ctx context.Context, lat, lon float64) (*photo
 		Country:     "Test Country",
 		CountryCode: "TC",
 	}, nil
+}
+
+// --- UserService ------------------------------------------------------------
+
+type UserService struct {
+	mu    sync.Mutex
+	users map[string]*photo.User // keyed by username
+}
+
+func NewUserService() *UserService {
+	return &UserService{users: make(map[string]*photo.User)}
+}
+
+func (s *UserService) CreateUser(ctx context.Context, u *photo.User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[strings.ToLower(u.Username)]; ok {
+		return photo.Errorf(photo.ECONFLICT, "username already taken")
+	}
+	u.ID = kid.New()
+	u.CreatedAt = time.Now()
+	u.UpdatedAt = time.Now()
+	cp := *u
+	s.users[strings.ToLower(u.Username)] = &cp
+	return nil
+}
+
+func (s *UserService) FindUserByID(ctx context.Context, id kid.ID) (*photo.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, u := range s.users {
+		if u.ID == id {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, photo.Errorf(photo.ENOTFOUND, "user not found")
+}
+
+func (s *UserService) FindUserByUsername(ctx context.Context, username string) (*photo.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[strings.ToLower(username)]
+	if !ok {
+		return nil, photo.Errorf(photo.ENOTFOUND, "user not found")
+	}
+	cp := *u
+	return &cp, nil
+}
+
+// --- SessionService ---------------------------------------------------------
+
+type SessionService struct {
+	mu       sync.Mutex
+	sessions map[string]*photo.Session // keyed by token hash
+}
+
+func NewSessionService() *SessionService {
+	return &SessionService{sessions: make(map[string]*photo.Session)}
+}
+
+func (s *SessionService) CreateSession(ctx context.Context, sess *photo.Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess.ID = kid.New()
+	sess.CreatedAt = time.Now()
+	cp := *sess
+	s.sessions[sess.TokenHash] = &cp
+	return nil
+}
+
+func (s *SessionService) FindSessionByTokenHash(ctx context.Context, tokenHash string) (*photo.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[tokenHash]
+	if !ok {
+		return nil, photo.Errorf(photo.ENOTFOUND, "session not found")
+	}
+	cp := *sess
+	return &cp, nil
+}
+
+func (s *SessionService) DeleteSession(ctx context.Context, id kid.ID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, sess := range s.sessions {
+		if sess.ID == id {
+			delete(s.sessions, k)
+			return nil
+		}
+	}
+	return photo.Errorf(photo.ENOTFOUND, "session not found")
+}
+
+func (s *SessionService) DeleteExpiredSessions(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, sess := range s.sessions {
+		if sess.IsExpired() {
+			delete(s.sessions, k)
+		}
+	}
+	return nil
+}
+
+// --- StatusService ----------------------------------------------------------
+
+type StatusService struct{}
+
+func (s *StatusService) LibraryStatus(ctx context.Context) (*photo.LibraryStatus, error) {
+	return &photo.LibraryStatus{}, nil
+}
+
+// --- AlbumService -----------------------------------------------------------
+
+type AlbumService struct {
+	mu     sync.Mutex
+	albums map[kid.ID]*photo.Album
+}
+
+func NewAlbumService() *AlbumService {
+	return &AlbumService{albums: make(map[kid.ID]*photo.Album)}
+}
+
+func (s *AlbumService) FindAlbumByID(ctx context.Context, id kid.ID) (*photo.Album, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.albums[id]
+	if !ok {
+		return nil, photo.Errorf(photo.ENOTFOUND, "album not found")
+	}
+	cp := *a
+	return &cp, nil
+}
+
+func (s *AlbumService) FindAlbums(ctx context.Context, filter photo.AlbumFilter) ([]*photo.Album, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*photo.Album
+	for _, a := range s.albums {
+		if !filter.UserID.IsNil() && a.UserID != filter.UserID {
+			continue
+		}
+		cp := *a
+		out = append(out, &cp)
+	}
+	return out, len(out), nil
+}
+
+func (s *AlbumService) CreateAlbum(ctx context.Context, a *photo.Album) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a.ID = kid.New()
+	a.CreatedAt = time.Now()
+	a.UpdatedAt = time.Now()
+	cp := *a
+	s.albums[cp.ID] = &cp
+	return nil
+}
+
+func (s *AlbumService) UpdateAlbum(ctx context.Context, id kid.ID, upd photo.AlbumUpdate) (*photo.Album, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.albums[id]
+	if !ok {
+		return nil, photo.Errorf(photo.ENOTFOUND, "album not found")
+	}
+	if upd.Name != nil {
+		a.Name = *upd.Name
+	}
+	if upd.Description != nil {
+		a.Description = *upd.Description
+	}
+	cp := *a
+	return &cp, nil
+}
+
+func (s *AlbumService) DeleteAlbum(ctx context.Context, id kid.ID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.albums[id]; !ok {
+		return photo.Errorf(photo.ENOTFOUND, "album not found")
+	}
+	delete(s.albums, id)
+	return nil
+}
+
+func (s *AlbumService) AddPhoto(ctx context.Context, albumID, photoID kid.ID) error {
+	return nil
+}
+func (s *AlbumService) RemovePhoto(ctx context.Context, albumID, photoID kid.ID) error {
+	return nil
+}
+func (s *AlbumService) MovePhoto(ctx context.Context, albumID, photoID, afterPhotoID kid.ID) error {
+	return nil
+}
+func (s *AlbumService) FindAlbumPhotos(ctx context.Context, albumID kid.ID, offset, limit int) ([]*photo.Photo, int, error) {
+	return nil, 0, nil
 }

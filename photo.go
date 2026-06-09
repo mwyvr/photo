@@ -49,6 +49,11 @@ type Photo struct {
 	// Example: "Tokyo, Japan"
 	LocationName string `json:"locationName,omitempty"`
 
+	// ThumbPath is the path relative to LibraryRoot of the cached thumbnail.
+	// Nil until the thumbnail is first generated on request.
+	// Format: .photo/thumbs/<kid-id>.jpg
+	ThumbPath *string `json:"thumbPath,omitempty"`
+
 	// Full exiftool JSON output, stored as a blob.
 	// Included in single-photo API responses (photo show --exif); omitted from lists.
 	EXIFRaw string `json:"exifRaw,omitempty"`
@@ -56,6 +61,11 @@ type Photo struct {
 	// IsRaw is true when the file is a camera RAW format (NEF, CR2, ARW, etc.)
 	// rather than a rendered image (JPEG, PNG, HEIC).
 	IsRaw bool `json:"isRaw"`
+
+	// Published controls public visibility. When true, the photo is accessible
+	// via unauthenticated public URLs suitable for linking from a blog.
+	// Defaults to false (private). Set explicitly via 'photo publish' or the web UI.
+	Published bool `json:"published"`
 
 	// RawPartnerID points to the RAW (or JPEG) counterpart of this photo when
 	// a camera produces RAW+JPEG pairs. Unpopulated at MVP; reserved for future use.
@@ -110,12 +120,19 @@ type PhotoFilter struct {
 	// Location searches LocationName with a case-insensitive LIKE match.
 	Location *string
 
+	// SHA256 filters to an exact hash match. Used for duplicate pre-flight checks.
+	SHA256 *string
+
 	// Tags: all listed tags must be present (AND semantics).
 	Tags []string
 
 	// IsRaw filters to RAW-only (true) or non-RAW only (false).
 	// Nil means no filter — return both.
 	IsRaw *bool
+
+	// Published filters to public (true) or private (false) photos.
+	// Nil means no filter — return both. Used by the public web UI.
+	Published *bool
 
 	Offset int
 	Limit  int
@@ -125,6 +142,8 @@ type PhotoFilter struct {
 type PhotoUpdate struct {
 	Description  *string
 	LocationName *string // set directly (manual) or from reverse geocoding
+	Published    *bool   // nil = no change
+	ThumbPath    *string // set when thumbnail is generated on first request
 }
 
 // ImportOptions configures a single file import.
@@ -136,8 +155,11 @@ type ImportOptions struct {
 	UserID kid.ID
 
 	// RawOnly skips non-RAW image files (JPEG, PNG, HEIC, etc.) during import.
-	// Has no effect on files that are not images at all; those are always skipped.
 	RawOnly bool
+
+	// Published marks the imported photo as publicly visible.
+	// Used by 'photo publish' to make photos available for blog linking.
+	Published bool
 }
 
 // ImportResult describes the outcome of importing a single file.

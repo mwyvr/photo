@@ -57,6 +57,10 @@ type NominatimGeocoder struct {
 	// Defaults to a client with a 10-second timeout if nil.
 	HTTPClient *http.Client
 
+	// baseURL is the Nominatim reverse geocode endpoint.
+	// Defaults to nominatimBaseURL; overridable via SetBaseURL for tests.
+	baseURL string
+
 	// mu protects both the rate limiter and the cache.
 	mu          sync.Mutex
 	lastRequest time.Time
@@ -71,7 +75,8 @@ func NewNominatimGeocoder(userAgent string) *NominatimGeocoder {
 		HTTPClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		cache: make(map[string]cacheEntry),
+		baseURL: nominatimBaseURL,
+		cache:   make(map[string]cacheEntry),
 	}
 }
 
@@ -110,7 +115,7 @@ func (g *NominatimGeocoder) ReverseGeocode(ctx context.Context, lat, lon float64
 	params.Set("zoom", "10") // city level; 14 = suburb, 8 = county
 	params.Set("addressdetails", "1")
 
-	reqURL := nominatimBaseURL + "?" + params.Encode()
+	reqURL := g.baseURL + "?" + params.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -162,6 +167,12 @@ func (g *NominatimGeocoder) store(key string, loc *photo.Location) {
 	g.mu.Lock()
 	g.cache[key] = cacheEntry{location: loc}
 	g.mu.Unlock()
+}
+
+// SetBaseURL overrides the Nominatim API base URL. Used in tests to point
+// the geocoder at a local test server instead of the real Nominatim endpoint.
+func (g *NominatimGeocoder) SetBaseURL(url string) {
+	g.baseURL = url
 }
 
 // rateLimit blocks until it is safe to make the next Nominatim request.

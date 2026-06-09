@@ -21,6 +21,7 @@ import (
 	"syscall"
 
 	photohttp "github.com/mwyvr/photo/http"
+	htmlui "github.com/mwyvr/photo/http/html"
 	"github.com/mwyvr/photo/exif"
 	"github.com/mwyvr/photo/geocode"
 	"github.com/mwyvr/photo/importer"
@@ -66,6 +67,8 @@ func run(ctx context.Context) error {
 	sessionSvc := sqlite.NewSessionService(db)
 	photoSvc := sqlite.NewPhotoService(db)
 	tagSvc := sqlite.NewTagService(db)
+	statusSvc := sqlite.NewStatusService(db)
+	albumSvc := sqlite.NewAlbumService(db)
 
 	// Build EXIF extractor.
 	extractor := exif.NewExtractor("")
@@ -87,13 +90,33 @@ func run(ctx context.Context) error {
 	srv.SessionService = sessionSvc
 	srv.PhotoService = photoSvc
 	srv.TagService = tagSvc
+	srv.StatusService = statusSvc
+	srv.AlbumService = albumSvc
 	srv.Importer = imp
 	srv.Geocoder = geocoder
 	srv.JWTSecret = cfg.JWTSecret
 	srv.LibraryRoot = cfg.LibraryRoot
+	srv.PublishDefault = cfg.PublishDefault
 
-	log.Printf("photod library: %s", cfg.LibraryRoot)
-	log.Printf("photod database: %s", cfg.DBPath())
+	// Build and register HTML UI.
+	ui, err := htmlui.New()
+	if err != nil {
+		return fmt.Errorf("html ui: %w", err)
+	}
+	ui.PhotoService = photoSvc
+	ui.AlbumService = albumSvc
+	ui.SessionService = sessionSvc
+	ui.UserService = userSvc
+	ui.StatusService = statusSvc
+	ui.JWTSecret = cfg.JWTSecret
+	ui.LibraryRoot = cfg.LibraryRoot
+	ui.RegisterRoutes(srv.Router())
+
+	log.Printf("photod library:         %s", cfg.LibraryRoot)
+	log.Printf("photod database:        %s", cfg.DBPath())
+	log.Printf("photod publish default: %v (RAW always false)", cfg.PublishDefault)
+	log.Printf("photod web UI:          http://%s/", cfg.Addr)
+	log.Printf("photod API:             http://%s/api/v1/", cfg.Addr)
 	return srv.ListenAndServe(ctx)
 }
 
@@ -110,6 +133,12 @@ type ServerConfig struct {
 	// JWTSecret is a hex-encoded 32-byte random secret used to sign JWTs.
 	// Generated once on first run and never changes.
 	JWTSecretHex string `json:"jwtSecret"`
+
+	// PublishDefault controls the default public visibility of uploaded photos.
+	// When true, non-RAW photos are marked published on import unless explicitly
+	// overridden. RAW files always default to unpublished regardless of this setting.
+	// Defaults to false (private) on first run.
+	PublishDefault bool `json:"publishDefault"`
 
 	// JWTSecret is the decoded form of JWTSecretHex. Not persisted.
 	JWTSecret []byte `json:"-"`

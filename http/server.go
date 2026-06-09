@@ -41,6 +41,8 @@ type Server struct {
 	TagService     photo.TagService
 	Importer       photo.Importer
 	Geocoder       photo.Geocoder
+	StatusService  photo.StatusService
+	AlbumService   photo.AlbumService
 
 	// JWTSecret is the HMAC-SHA256 signing key for JWT tokens.
 	// Generated once at server startup and stored in the server config file.
@@ -48,6 +50,10 @@ type Server struct {
 
 	// TokenTTL is how long a JWT is valid. Default: 30 days.
 	TokenTTL time.Duration
+
+	// PublishDefault is the server-wide default for photo visibility on upload.
+	// RAW files are always unpublished regardless of this setting.
+	PublishDefault bool
 
 	// LibraryRoot is the base directory where photo files are stored.
 	LibraryRoot string
@@ -77,16 +83,27 @@ func (s *Server) registerRoutes() {
 
 	// Authenticated routes — wrapped in requireAuth middleware.
 	s.router.HandleFunc("DELETE /api/v1/logout", s.requireAuth(s.handleLogout))
+	s.router.HandleFunc("GET /api/v1/status", s.requireAuth(s.handleStatus))
 
 	s.router.HandleFunc("GET /api/v1/photos", s.requireAuth(s.handleListPhotos))
+	s.router.HandleFunc("GET /api/v1/photos/exists", s.requireAuth(s.handlePhotoExists))
 	s.router.HandleFunc("POST /api/v1/photos", s.requireAuth(s.handleUploadPhoto))
 	s.router.HandleFunc("GET /api/v1/photos/{id}", s.requireAuth(s.handleGetPhoto))
+	s.router.HandleFunc("GET /api/v1/photos/{id}/file", s.requireAuth(s.handleServePhotoFile))
 	s.router.HandleFunc("PATCH /api/v1/photos/{id}", s.requireAuth(s.handleUpdatePhoto))
 	s.router.HandleFunc("DELETE /api/v1/photos/{id}", s.requireAuth(s.handleDeletePhoto))
 	s.router.HandleFunc("POST /api/v1/photos/{id}/regeocode", s.requireAuth(s.handleRegeocode))
 
 	s.router.HandleFunc("POST /api/v1/photos/{id}/tags/{name}", s.requireAuth(s.handleAttachTag))
 	s.router.HandleFunc("DELETE /api/v1/photos/{id}/tags/{name}", s.requireAuth(s.handleDetachTag))
+
+	s.registerAlbumRoutes()
+}
+
+// Router returns the underlying ServeMux so additional routes can be registered.
+// Used by the HTML UI package to share the same listener.
+func (s *Server) Router() *http.ServeMux {
+	return s.router
 }
 
 // ListenAndServe starts the HTTP server. It blocks until the context is done.

@@ -69,14 +69,20 @@ func run(ctx context.Context, args []string) error {
 	switch cmd {
 	case "logout":
 		cmdErr = runLogout(ctx, client, cfg)
+	case "status":
+		cmdErr = runStatus(ctx, client, rest)
 	case "add":
 		cmdErr = runAdd(ctx, client, cfg, rest)
+	case "publish":
+		cmdErr = runPublish(ctx, client, cfg, rest)
 	case "delete":
 		cmdErr = runDelete(ctx, client, rest)
 	case "update":
 		cmdErr = runUpdate(ctx, client, rest)
 	case "regeocode":
 		cmdErr = runRegeocode(ctx, client, rest)
+	case "album":
+		cmdErr = runAlbum(ctx, client, rest)
 	case "search", "list":
 		cmdErr = runSearch(ctx, client, rest)
 	case "tag":
@@ -112,10 +118,13 @@ Commands:
   register   Create a new account on the server
   login      Authenticate and store a session token
   logout     Invalidate the current session
-  add        Import a file or directory
+  status     Show library statistics
+  add        Import a file or directory (originals untouched)
+  publish    Upload a publish directory, deriving tags from path
   delete     Delete a photo from the library
   update     Update photo description
   regeocode  Set or update a photo's location
+  album      Manage albums (list, create, show, delete, add, remove, move, cover)
   list       List all photos (alias for search)
   search     Search photos by date, location, or tag
   tag        Attach a tag to a photo

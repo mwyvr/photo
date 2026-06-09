@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -156,7 +159,44 @@ func (c *client) listPhotos(ctx context.Context, p searchParams) (*listPhotosRes
 	return &resp, nil
 }
 
+// checkExists asks the server if a file with the given SHA-256 is already
+// in the library. Returns (true, id) if found, (false, "") if not.
+func (c *client) checkExists(ctx context.Context, sha256 string) (bool, string, error) {
+	var result struct {
+		ID string `json:"id"`
+	}
+	err := c.do(ctx, http.MethodGet, "/api/v1/photos/exists?sha256="+sha256, nil, &result)
+	if err == nil {
+		return true, result.ID, nil
+	}
+	// ENOTFOUND means not in library — not an error for our purposes.
+	if isNotFound(err) {
+		return false, "", nil
+	}
+	return false, "", err
+}
+
 func (c *client) uploadPhoto(ctx context.Context, filePath string, rawOnly bool) (*photoJSON, error) {
+	return c.uploadPhotoOpts(ctx, filePath, rawOnly, false, nil)
+}
+
+// uploadPhotoOpts is the full upload implementation used by both add and publish.
+// published=true marks the photo as publicly visible.
+// tags are attached after upload if non-empty.
+func (c *client) uploadPhotoOpts(ctx context.Context, filePath string, rawOnly, published bool, tags []string) (*photoJSON, error) {
+	// Pre-flight: compute SHA-256 and check if already in library.
+	sha256, err := hashFileHex(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("hash %q: %w", filePath, err)
+	}
+	exists, existingID, err := c.checkExists(ctx, sha256)
+	if err != nil {
+		return nil, fmt.Errorf("pre-flight check: %w", err)
+	}
+	if exists {
+		return nil, &alreadyExistsError{id: existingID}
+	}
+
 	f, err := openFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("open %q: %w", filePath, err)
@@ -175,12 +215,18 @@ func (c *client) uploadPhoto(ctx context.Context, filePath string, rawOnly bool)
 	mw.Close()
 
 	uploadURL := c.baseURL + "/api/v1/photos"
+	params := url.Values{}
 	if rawOnly {
-		uploadURL += "?raw_only=true"
+		params.Set("raw_only", "true")
+	}
+	if published {
+		params.Set("published", "true")
+	}
+	if len(params) > 0 {
+		uploadURL += "?" + params.Encode()
 	}
 
-	req, err := http.NewRequestWithContext(ctx,
-		http.MethodPost, uploadURL, &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, &body)
 	if err != nil {
 		return nil, err
 	}
@@ -201,8 +247,50 @@ func (c *client) uploadPhoto(ctx context.Context, filePath string, rawOnly bool)
 	if err := json.NewDecoder(httpResp.Body).Decode(&p); err != nil {
 		return nil, fmt.Errorf("decode upload response: %w", err)
 	}
+
+	// Attach tags after successful upload.
+	for _, tag := range tags {
+		if err := c.attachTag(ctx, p.ID, tag); err != nil {
+			// Non-fatal: log but don't fail the upload.
+			fmt.Fprintf(os.Stderr, "  warn   tag %q: %v\n", tag, err)
+		}
+	}
+
 	return &p, nil
 }
+
+// alreadyExistsError is returned by uploadPhotoOpts when the pre-flight check
+// finds the file is already in the library.
+type alreadyExistsError struct{ id string }
+
+func (e *alreadyExistsError) Error() string {
+	return fmt.Sprintf("already in library (id: %s)", e.id)
+}
+
+// isAlreadyExists reports whether err is an alreadyExistsError.
+func isAlreadyExists(err error) bool {
+	_, ok := err.(*alreadyExistsError)
+	return ok
+}
+
+// isNotFound reports whether an API error response has code "not_found".
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "code: not_found")
+}
+
+
+
+func (c *client) getStatus(ctx context.Context) (*statusJSON, error) {
+	var st statusJSON
+	if err := c.do(ctx, http.MethodGet, "/api/v1/status", nil, &st); err != nil {
+		return nil, err
+	}
+	return &st, nil
+}
+
 
 func (c *client) getPhoto(ctx context.Context, id string) (*photoJSON, error) {
 	var p photoJSON
@@ -313,6 +401,20 @@ func checkStatus(resp *http.Response) error {
 		return fmt.Errorf("%s (code: %s)", apiErr.Message, apiErr.Code)
 	}
 	return fmt.Errorf("server returned %d", resp.StatusCode)
+}
+
+// hashFileHex computes the SHA-256 hex digest of a file.
+func hashFileHex(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func openFile(path string) (*os.File, error) {
