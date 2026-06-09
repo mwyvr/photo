@@ -67,6 +67,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /p/{id}/thumb", s.handlePublicThumb)
 	mux.HandleFunc("GET /photo/{id}", s.handlePhotoDetail)
 	mux.HandleFunc("GET /photo/{id}/file", s.handlePrivatePhotoFile)
+	mux.HandleFunc("GET /photo/{id}/thumb", s.handlePrivateThumb)
+	mux.HandleFunc("GET /photo/{id}/preview", s.handlePrivatePreview)
 
 	// Auth.
 	mux.HandleFunc("GET /login", s.handleLoginForm)

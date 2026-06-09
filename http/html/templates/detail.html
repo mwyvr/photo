@@ -12,7 +12,7 @@
     <img src="/p/{{.Photo.ID}}"
          alt="{{if .Photo.LocationName}}{{.Photo.LocationName}}{{else}}{{.Photo.Filename}}{{end}}">
     {{else if .Authenticated}}
-    <img src="/photo/{{.Photo.ID}}/file"
+    <img src="/photo/{{.Photo.ID}}/preview"
          alt="{{if .Photo.LocationName}}{{.Photo.LocationName}}{{else}}{{.Photo.Filename}}{{end}}">
     {{else}}
     <div class="photo-card-placeholder" style="aspect-ratio:4/3;background:var(--clr-surface);border-radius:var(--radius-md)">

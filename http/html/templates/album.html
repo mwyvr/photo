@@ -29,16 +29,14 @@
 {{if .Photos}}
 <div class="photo-grid">
   {{range .Photos}}
-  <a href="/p/{{.ID}}" class="photo-card">
-    {{if .ThumbPath}}
-    <img src="/p/{{.ID}}/thumb"
+  <a href="/photo/{{.ID}}" class="photo-card">
+    <img src="{{if $.Authenticated}}/photo/{{.ID}}/thumb{{else}}/p/{{.ID}}/thumb{{end}}"
          alt="{{if .LocationName}}{{.LocationName}}{{else}}Photo{{end}}"
-         loading="lazy">
-    {{else}}
-    <div class="photo-card-placeholder">
+         loading="lazy"
+         onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">
+    <div class="photo-card-placeholder" style="display:none">
       <span>{{.FileType}}</span>
     </div>
-    {{end}}
     {{if .IsRaw}}<span class="badge-raw">RAW</span>{{end}}
     <div class="photo-card-overlay">
       <div class="photo-card-meta">
