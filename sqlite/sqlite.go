@@ -39,14 +39,34 @@ func (db *DB) Open() (err error) {
 	if db.DSN == "" {
 		return fmt.Errorf("sqlite: DSN is required")
 	}
-	if db.db, err = sql.Open("sqlite3", db.DSN); err != nil {
+
+	// Append busy_timeout to the DSN so SQLite waits up to 5s for a write
+	// lock rather than immediately returning SQLITE_BUSY.
+	dsn := db.DSN
+	if dsn != ":memory:" {
+		if strings.Contains(dsn, "?") {
+			dsn += "&_busy_timeout=5000"
+		} else {
+			dsn += "?_busy_timeout=5000"
+		}
+	}
+
+	if db.db, err = sql.Open("sqlite3", dsn); err != nil {
 		return fmt.Errorf("sqlite: open %q: %w", db.DSN, err)
 	}
+
+	// Limit to one open connection so concurrent goroutines queue rather
+	// than racing for the write lock. Reads use WAL and are unaffected.
+	db.db.SetMaxOpenConns(1)
+
 	if _, err = db.db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
 		return fmt.Errorf("sqlite: enable WAL: %w", err)
 	}
 	if _, err = db.db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
 		return fmt.Errorf("sqlite: enable foreign keys: %w", err)
+	}
+	if _, err = db.db.Exec(`PRAGMA synchronous = NORMAL`); err != nil {
+		return fmt.Errorf("sqlite: set synchronous: %w", err)
 	}
 	return db.migrate()
 }
