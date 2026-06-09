@@ -1,0 +1,85 @@
+{{define "title"}}
+  {{if .Query.Location}}{{.Query.Location}} · {{end}}
+  {{if .Query.Tag}}#{{.Query.Tag}} · {{end}}
+  Photo Library
+{{end}}
+
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Library</h1>
+  {{if .Total}}<p class="page-subtitle">{{.Total}} photo{{if ne .Total 1}}s{{end}}</p>{{end}}
+</div>
+
+<form class="search-form" method="GET" action="/">
+  <div class="search-field">
+    <label for="q-location">Location</label>
+    <input type="text" id="q-location" name="location"
+           value="{{.Query.Location}}" placeholder="City or country">
+  </div>
+  <div class="search-field">
+    <label for="q-tag">Tag</label>
+    <input type="text" id="q-tag" name="tag"
+           value="{{.Query.Tag}}" placeholder="e.g. travel">
+  </div>
+  <div class="search-field">
+    <label for="q-after">From</label>
+    <input type="date" id="q-after" name="after" value="{{.Query.After}}">
+  </div>
+  <div class="search-field">
+    <label for="q-before">To</label>
+    <input type="date" id="q-before" name="before" value="{{.Query.Before}}">
+  </div>
+  <div class="search-actions">
+    <button type="submit" class="btn btn-primary">Search</button>
+    {{if .Query.Active}}<a href="/" class="btn btn-ghost">Clear</a>{{end}}
+  </div>
+</form>
+
+{{if .Photos}}
+<div class="photo-grid">
+  {{range .Photos}}
+  <a href="/photo/{{.ID}}" class="photo-card">
+    {{if .ThumbPath}}
+    <img src="/p/{{.ID}}/thumb"
+         alt="{{if .LocationName}}{{.LocationName}}{{else}}Photo{{end}}"
+         loading="lazy">
+    {{else}}
+    <div class="photo-card-placeholder">
+      <span>{{.FileType}}</span>
+    </div>
+    {{end}}
+    {{if .IsRaw}}<span class="badge-raw">RAW</span>{{end}}
+    <div class="photo-card-overlay">
+      <div class="photo-card-meta">
+        {{if .LocationName}}<div>{{.LocationName}}</div>{{end}}
+        {{if .CapturedAt}}<div class="photo-card-date">{{.CapturedAt.Format "2006-01-02"}}</div>{{end}}
+      </div>
+    </div>
+  </a>
+  {{end}}
+</div>
+
+{{if or .PrevPage .NextPage}}
+<nav class="pagination" aria-label="Pagination">
+  {{if .PrevPage}}
+  <a href="{{.PrevPage}}" class="btn btn-ghost">← Previous</a>
+  {{end}}
+  <span class="pagination-info">{{.PageInfo}}</span>
+  {{if .NextPage}}
+  <a href="{{.NextPage}}" class="btn btn-ghost">Next →</a>
+  {{end}}
+</nav>
+{{end}}
+
+{{else}}
+<div class="empty-state">
+  <p class="empty-state-title">No photos found</p>
+  {{if .Query.Active}}
+  <p>Try adjusting your search filters.</p>
+  <a href="/" class="btn btn-ghost mt-sm">Clear search</a>
+  {{else}}
+  <p>Import some photos to get started.</p>
+  {{end}}
+</div>
+{{end}}
+{{end}}

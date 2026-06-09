@@ -1,0 +1,40 @@
+{{define "title"}}Status · Photo Library{{end}}
+
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Library Status</h1>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--space-md)">
+
+  <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:var(--space-lg)">
+    <h2 class="meta-section-title">Photos</h2>
+    <div class="meta-row mt-sm"><span class="meta-label">Total</span><span class="meta-value">{{.Status.TotalPhotos}}</span></div>
+    <div class="meta-row"><span class="meta-label">RAW</span><span class="meta-value">{{.Status.TotalRAW}}</span></div>
+    <div class="meta-row"><span class="meta-label">Non-RAW</span><span class="meta-value">{{.Status.TotalNonRAW}}</span></div>
+    <div class="meta-row"><span class="meta-label">Published</span><span class="meta-value text-success">{{.Status.TotalPublished}}</span></div>
+    <div class="meta-row"><span class="meta-label">Size</span><span class="meta-value">{{formatBytes .Status.TotalSizeBytes}}</span></div>
+  </div>
+
+  <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:var(--space-lg)">
+    <h2 class="meta-section-title">Metadata</h2>
+    <div class="meta-row mt-sm"><span class="meta-label">Located</span><span class="meta-value">{{.Status.WithLocation}}</span></div>
+    <div class="meta-row"><span class="meta-label">No location</span><span class="meta-value {{if gt .Status.WithoutLocation 0}}text-muted{{end}}">{{.Status.WithoutLocation}}</span></div>
+    <div class="meta-row"><span class="meta-label">With GPS</span><span class="meta-value">{{.Status.WithGPS}}</span></div>
+    <div class="meta-row"><span class="meta-label">Described</span><span class="meta-value">{{.Status.WithDescription}}</span></div>
+  </div>
+
+  <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:var(--space-lg)">
+    <h2 class="meta-section-title">Library</h2>
+    <div class="meta-row mt-sm"><span class="meta-label">Tags</span><span class="meta-value">{{.Status.TotalTags}}</span></div>
+    <div class="meta-row"><span class="meta-label">Albums</span><span class="meta-value">{{.Status.TotalAlbums}}</span></div>
+    {{if .Status.OldestCapturedAt}}
+    <div class="meta-row"><span class="meta-label">Oldest</span><span class="meta-value">{{.Status.OldestCapturedAt.Format "2006-01-02"}}</span></div>
+    {{end}}
+    {{if .Status.NewestCapturedAt}}
+    <div class="meta-row"><span class="meta-label">Newest</span><span class="meta-value">{{.Status.NewestCapturedAt.Format "2006-01-02"}}</span></div>
+    {{end}}
+  </div>
+
+</div>
+{{end}}

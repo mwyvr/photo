@@ -1,0 +1,154 @@
+{{define "title"}}{{.Photo.Filename}} · Photo Library{{end}}
+
+{{define "content"}}
+<div class="page-header">
+  <a href="javascript:history.back()" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="detail-layout">
+
+  <div class="detail-image-wrap">
+    {{if .Photo.Published}}
+    <img src="/p/{{.Photo.ID}}"
+         alt="{{if .Photo.LocationName}}{{.Photo.LocationName}}{{else}}{{.Photo.Filename}}{{end}}">
+    {{else if .Authenticated}}
+    <img src="/photo/{{.Photo.ID}}/file"
+         alt="{{if .Photo.LocationName}}{{.Photo.LocationName}}{{else}}{{.Photo.Filename}}{{end}}">
+    {{else}}
+    <div class="photo-card-placeholder" style="aspect-ratio:4/3;background:var(--clr-surface);border-radius:var(--radius-md)">
+      <span>Private photo</span>
+    </div>
+    {{end}}
+  </div>
+
+  <div class="detail-meta">
+
+    <div class="meta-section">
+      <h2 class="meta-section-title">File</h2>
+      <div class="meta-row">
+        <span class="meta-label">Name</span>
+        <span class="meta-value">{{.Photo.Filename}}</span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-label">Type</span>
+        <span class="meta-value">{{.Photo.FileType}}{{if .Photo.IsRaw}} · <span class="text-accent">RAW</span>{{end}}</span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-label">Size</span>
+        <span class="meta-value">{{formatBytes .Photo.FileSizeBytes}}</span>
+      </div>
+      {{if .Photo.Published}}
+      <div class="meta-row">
+        <span class="meta-label">Status</span>
+        <span class="meta-value text-success">Published</span>
+      </div>
+      {{end}}
+    </div>
+
+    {{if or .Photo.CameraModel .Photo.LensModel .Photo.FocalLength}}
+    <div class="meta-section">
+      <h2 class="meta-section-title">Camera</h2>
+      {{if .Photo.CameraModel}}
+      <div class="meta-row">
+        <span class="meta-label">Model</span>
+        <span class="meta-value">{{if .Photo.CameraMake}}{{.Photo.CameraMake}} {{end}}{{.Photo.CameraModel}}</span>
+      </div>
+      {{end}}
+      {{if .Photo.LensModel}}
+      <div class="meta-row">
+        <span class="meta-label">Lens</span>
+        <span class="meta-value">{{.Photo.LensModel}}</span>
+      </div>
+      {{end}}
+      {{if .Photo.FocalLength}}
+      <div class="meta-row">
+        <span class="meta-label">Focal</span>
+        <span class="meta-value">{{.Photo.FocalLength}}</span>
+      </div>
+      {{end}}
+      {{if .Photo.Aperture}}
+      <div class="meta-row">
+        <span class="meta-label">Aperture</span>
+        <span class="meta-value">{{.Photo.Aperture}}</span>
+      </div>
+      {{end}}
+      {{if .Photo.ShutterSpeed}}
+      <div class="meta-row">
+        <span class="meta-label">Shutter</span>
+        <span class="meta-value">{{.Photo.ShutterSpeed}}</span>
+      </div>
+      {{end}}
+      {{if .Photo.ISO}}
+      <div class="meta-row">
+        <span class="meta-label">ISO</span>
+        <span class="meta-value">{{.Photo.ISO}}</span>
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+
+    <div class="meta-section">
+      <h2 class="meta-section-title">Time &amp; Location</h2>
+      {{if .Photo.CapturedAt}}
+      <div class="meta-row">
+        <span class="meta-label">Date</span>
+        <span class="meta-value">{{.Photo.CapturedAt.Format "2006-01-02"}}</span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-label">Time</span>
+        <span class="meta-value">{{.Photo.CapturedAt.Format "15:04:05"}} UTC</span>
+      </div>
+      {{end}}
+      {{if .Photo.LocationName}}
+      <div class="meta-row">
+        <span class="meta-label">Place</span>
+        <span class="meta-value">
+          <a href="/?location={{.Photo.LocationName}}">{{.Photo.LocationName}}</a>
+        </span>
+      </div>
+      {{end}}
+      {{if .Photo.GPSLat}}
+      <div class="meta-row">
+        <span class="meta-label">GPS</span>
+        <span class="meta-value">{{printf "%.5f" (deref .Photo.GPSLat)}}, {{printf "%.5f" (deref .Photo.GPSLon)}}</span>
+      </div>
+      {{end}}
+    </div>
+
+    {{if or .Photo.Tags .Photo.Description}}
+    <div class="meta-section">
+      <h2 class="meta-section-title">Tags &amp; Notes</h2>
+      {{if .Photo.Tags}}
+      <ul class="tag-list">
+        {{range .Photo.Tags}}
+        <li><a href="/?tag={{.Name}}" class="tag">{{.Name}}</a></li>
+        {{end}}
+      </ul>
+      {{end}}
+      {{if .Photo.Description}}
+      <p class="mt-sm">{{.Photo.Description}}</p>
+      {{end}}
+    </div>
+    {{end}}
+
+    {{if .Photo.Published}}
+    <div class="meta-section">
+      <h2 class="meta-section-title">Share</h2>
+      <div class="meta-row">
+        <span class="meta-label">URL</span>
+        <span class="meta-value">
+          <code>/p/{{.Photo.ID}}</code>
+        </span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-label">Hugo</span>
+        <span class="meta-value">
+          <code>{{`{{`}}< photo id="{{.Photo.ID}}" >{{`}}`}}</code>
+        </span>
+      </div>
+    </div>
+    {{end}}
+
+  </div>
+</div>
+{{end}}

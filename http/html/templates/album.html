@@ -1,0 +1,67 @@
+{{define "title"}}{{.Album.Name}} · Albums · Photo Library{{end}}
+
+{{define "content"}}
+<div class="album-header">
+  {{if .Album.CoverPhotoID}}
+  <img class="album-cover"
+       src="/p/{{.Album.CoverPhotoID}}/thumb"
+       alt="{{.Album.Name}}">
+  {{else}}
+  <div class="album-cover-placeholder">No cover</div>
+  {{end}}
+
+  <div class="album-info">
+    <h1 class="album-title">{{.Album.Name}}</h1>
+    {{if .Album.Description}}
+    <p class="album-description">{{.Album.Description}}</p>
+    {{end}}
+    <p class="album-stats">
+      {{.Album.PhotoCount}} photo{{if ne .Album.PhotoCount 1}}s{{end}}
+    </p>
+    {{if .Authenticated}}
+    <div class="mt-md">
+      <code class="text-muted">{{`{{`}}< album id="{{.Album.ID}}" >{{`}}`}}</code>
+    </div>
+    {{end}}
+  </div>
+</div>
+
+{{if .Photos}}
+<div class="photo-grid">
+  {{range .Photos}}
+  <a href="/p/{{.ID}}" class="photo-card">
+    {{if .ThumbPath}}
+    <img src="/p/{{.ID}}/thumb"
+         alt="{{if .LocationName}}{{.LocationName}}{{else}}Photo{{end}}"
+         loading="lazy">
+    {{else}}
+    <div class="photo-card-placeholder">
+      <span>{{.FileType}}</span>
+    </div>
+    {{end}}
+    {{if .IsRaw}}<span class="badge-raw">RAW</span>{{end}}
+    <div class="photo-card-overlay">
+      <div class="photo-card-meta">
+        {{if .LocationName}}<div>{{.LocationName}}</div>{{end}}
+        {{if .CapturedAt}}<div class="photo-card-date">{{.CapturedAt.Format "2006-01-02"}}</div>{{end}}
+      </div>
+    </div>
+  </a>
+  {{end}}
+</div>
+
+{{if or .PrevPage .NextPage}}
+<nav class="pagination" aria-label="Pagination">
+  {{if .PrevPage}}<a href="{{.PrevPage}}" class="btn btn-ghost">← Previous</a>{{end}}
+  <span class="pagination-info">{{.PageInfo}}</span>
+  {{if .NextPage}}<a href="{{.NextPage}}" class="btn btn-ghost">Next →</a>{{end}}
+</nav>
+{{end}}
+
+{{else}}
+<div class="empty-state">
+  <p class="empty-state-title">No photos in this album</p>
+  <p>Add photos with <code>photo album add {{.Album.ID}} &lt;photo-id&gt;</code></p>
+</div>
+{{end}}
+{{end}}

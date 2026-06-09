@@ -1,0 +1,46 @@
+{{define "base"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{block "title" .}}Photo Library{{end}}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="site-nav">
+    <div class="container">
+      <a href="/" class="nav-brand">photos</a>
+      <ul class="nav-links">
+        <li><a href="/" {{if eq .Page "grid"}}aria-current="page"{{end}}>Library</a></li>
+        <li><a href="/albums" {{if eq .Page "albums"}}aria-current="page"{{end}}>Albums</a></li>
+        {{if .Authenticated}}
+        <li><a href="/logout">Sign out</a></li>
+        {{else}}
+        <li><a href="/login">Sign in</a></li>
+        {{end}}
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+    <div class="container">
+      {{block "content" .}}{{end}}
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      {{if .Authenticated}}
+      <a href="/status">Status</a> ·
+      {{end}}
+      photo library
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>
+{{end}}
