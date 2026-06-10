@@ -1,12 +1,29 @@
 package html
 
 import (
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mwyvr/photo"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// realClientIP returns the client IP respecting X-Forwarded-For.
+func realClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if idx := strings.Index(xff, ","); idx != -1 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
+}
 
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 	// Already logged in — redirect to grid.
@@ -29,6 +46,19 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := realClientIP(r)
+	if !s.authLimiter.allow(ip) {
+		s.render(w, r, "login.html", struct {
+			baseData
+			Error    string
+			Username string
+		}{
+			baseData: s.newBase(r, "login"),
+			Error:    "Too many failed attempts. Please wait a minute and try again.",
+		})
+		return
+	}
+
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 	next := r.FormValue("next")
@@ -37,6 +67,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderError := func(msg string) {
+		s.authLimiter.record(ip)
 		s.render(w, r, "login.html", struct {
 			baseData
 			Error    string
@@ -79,7 +110,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  sess.ExpiresAt,
 	})
