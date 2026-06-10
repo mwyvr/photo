@@ -2,7 +2,6 @@ package html
 
 import (
 	"html/template"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -174,9 +173,6 @@ func (s *Server) resolveNavigation(r *http.Request, currentID kid.ID, userID kid
 	q := r.URL.Query()
 	ctx := q.Get("ctx")
 
-	log.Printf("nav: id=%s ctx=%q params=%v", currentID, ctx, q)
-
-	// Reconstruct the context query string to pass through to prev/next links.
 	ctxParams := url.Values{}
 	for k, v := range q {
 		ctxParams[k] = v
@@ -193,8 +189,6 @@ func (s *Server) resolveNavigation(r *http.Request, currentID kid.ID, userID kid
 	default:
 		backURL = "javascript:history.back()"
 	}
-
-	log.Printf("nav: prev=%q next=%q back=%q", prevURL, nextURL, backURL)
 	return
 }
 
