@@ -1,8 +1,22 @@
 {{define "title"}}{{.Photo.Filename}} · Photo Library{{end}}
 
 {{define "content"}}
-<div class="page-header">
-  <a href="javascript:history.back()" class="btn btn-ghost">← Back</a>
+<div class="page-header" style="display:flex;align-items:center;gap:var(--space-md)">
+  <a href="{{if .BackURL}}{{.BackURL}}{{else}}javascript:history.back(){{end}}" class="btn btn-ghost">← Back</a>
+  {{if or .PrevURL .NextURL}}
+  <nav class="detail-nav" aria-label="Photo navigation">
+    {{if .PrevURL}}
+    <a href="{{.PrevURL}}" class="btn btn-ghost" id="nav-prev" title="Previous (←)">‹ Prev</a>
+    {{else}}
+    <span class="btn btn-ghost" style="opacity:0.3;cursor:default">‹ Prev</span>
+    {{end}}
+    {{if .NextURL}}
+    <a href="{{.NextURL}}" class="btn btn-ghost" id="nav-next" title="Next (→)">Next ›</a>
+    {{else}}
+    <span class="btn btn-ghost" style="opacity:0.3;cursor:default">Next ›</span>
+    {{end}}
+  </nav>
+  {{end}}
 </div>
 
 <div class="detail-layout">
@@ -10,10 +24,14 @@
   <div class="detail-image-wrap">
     {{if .Photo.Published}}
     <img src="/p/{{.Photo.ID}}"
-         alt="{{if .Photo.LocationName}}{{.Photo.LocationName}}{{else}}{{.Photo.Filename}}{{end}}">
+         alt="{{if .Photo.LocationName}}{{.Photo.LocationName}}{{else}}{{.Photo.Filename}}{{end}}"
+         class="detail-img"
+         title="Click to expand">
     {{else if .Authenticated}}
     <img src="/photo/{{.Photo.ID}}/preview"
-         alt="{{if .Photo.LocationName}}{{.Photo.LocationName}}{{else}}{{.Photo.Filename}}{{end}}">
+         alt="{{if .Photo.LocationName}}{{.Photo.LocationName}}{{else}}{{.Photo.Filename}}{{end}}"
+         class="detail-img"
+         title="Click to expand">
     {{else}}
     <div class="photo-card-placeholder" style="aspect-ratio:4/3;background:var(--clr-surface);border-radius:var(--radius-md)">
       <span>Private photo</span>
@@ -151,4 +169,60 @@
 
   </div>
 </div>
+
+<!-- Lightbox overlay -->
+<div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Full size image" hidden>
+  <button class="lightbox-close" id="lightbox-close" aria-label="Close">✕</button>
+  <img class="lightbox-img" id="lightbox-img" src="" alt="">
+</div>
+
+<script>
+(function () {
+  const lb     = document.getElementById('lightbox');
+  const lbImg  = document.getElementById('lightbox-img');
+  const lbClose = document.getElementById('lightbox-close');
+  const src    = document.querySelector('.detail-img');
+
+  if (!src) return; // no image on page (private/unauthenticated)
+
+  function open() {
+    lbImg.src = src.src;
+    lbImg.alt = src.alt;
+    lb.hidden = false;
+    document.body.style.overflow = 'hidden';
+    lbClose.focus();
+  }
+
+  function close() {
+    lb.hidden = true;
+    document.body.style.overflow = '';
+    src.focus();
+  }
+
+  src.addEventListener('click', open);
+  src.style.cursor = 'zoom-in';
+
+  lbClose.addEventListener('click', close);
+  lb.addEventListener('click', function (e) {
+    if (e.target === lb) close(); // click backdrop to close
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (!lb.hidden && (e.key === 'Escape' || e.key === 'Esc')) {
+      close();
+      return;
+    }
+    // Arrow key navigation — only when lightbox is closed.
+    if (lb.hidden) {
+      if (e.key === 'ArrowLeft') {
+        const prev = document.getElementById('nav-prev');
+        if (prev) window.location = prev.href;
+      } else if (e.key === 'ArrowRight') {
+        const next = document.getElementById('nav-next');
+        if (next) window.location = next.href;
+      }
+    }
+  });
+})();
+</script>
 {{end}}

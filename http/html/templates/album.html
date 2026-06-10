@@ -29,7 +29,7 @@
 {{if .Photos}}
 <div class="photo-grid">
   {{range .Photos}}
-  <a href="/photo/{{.ID}}" class="photo-card">
+  <a href="/photo/{{.ID}}{{if $.CtxQuery}}?{{$.CtxQuery}}{{end}}" class="photo-card">
     <img src="{{if $.Authenticated}}/photo/{{.ID}}/thumb{{else}}/p/{{.ID}}/thumb{{end}}"
          alt="{{if .LocationName}}{{.LocationName}}{{else}}Photo{{end}}"
          loading="lazy"

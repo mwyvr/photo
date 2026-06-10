@@ -1,7 +1,9 @@
 package html
 
 import (
+	"html/template"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/mwyvr/kid"
@@ -14,16 +16,18 @@ func (s *Server) handleAlbumList(w http.ResponseWriter, r *http.Request) {
 	filter := photo.AlbumFilter{Limit: 200}
 	if authed {
 		filter.UserID = userID
-	} else {
-		// Public album list — only show albums that have at least one published photo.
-		// For simplicity at MVP: show all albums. Fine for a personal library.
-		// TODO: filter to albums containing published photos only.
 	}
 
-	albums, total, err := s.AlbumService.FindAlbums(r.Context(), filter)
+	albums, _, err := s.AlbumService.FindAlbums(r.Context(), filter)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
+	}
+
+	// For unauthenticated visitors, filter to albums that have at least one
+	// published photo and correct the photo count to published-only.
+	if !authed {
+		albums = s.filterPublicAlbums(r, albums)
 	}
 
 	s.render(w, r, "albums.html", struct {
@@ -33,8 +37,31 @@ func (s *Server) handleAlbumList(w http.ResponseWriter, r *http.Request) {
 	}{
 		baseData: s.newBase(r, "albums"),
 		Albums:   albums,
-		Total:    total,
+		Total:    len(albums),
 	})
+}
+
+// filterPublicAlbums removes albums with no published photos and corrects
+// the PhotoCount to reflect only published photos.
+func (s *Server) filterPublicAlbums(r *http.Request, albums []*photo.Album) []*photo.Album {
+	var out []*photo.Album
+	for _, a := range albums {
+		all, _, err := s.AlbumService.FindAlbumPhotos(r.Context(), a.ID, 0, 9999)
+		if err != nil {
+			continue
+		}
+		count := 0
+		for _, p := range all {
+			if p.Published {
+				count++
+			}
+		}
+		if count > 0 {
+			a.PhotoCount = count
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
@@ -55,11 +82,31 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, authed := s.authenticatedUserID(r)
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
 	photos, total, err := s.AlbumService.FindAlbumPhotos(r.Context(), albumID, offset, pageSize)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
+	}
+
+	// For unauthenticated visitors filter out unpublished photos and
+	// correct the count so the UI doesn't show empty slots or wrong numbers.
+	if !authed {
+		var pub []*photo.Photo
+		for _, p := range photos {
+			if p.Published {
+				pub = append(pub, p)
+			}
+		}
+		photos = pub
+		total = len(pub)
+		// If no published photos at all, return 404.
+		if total == 0 {
+			http.NotFound(w, r)
+			return
+		}
 	}
 
 	var prevPage, nextPage string
@@ -74,11 +121,21 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 		nextPage = pageURL(r, offset+pageSize)
 	}
 
+	// Build context query for detail page navigation.
+	ctxParams := url.Values{}
+	ctxParams.Set("ctx", "album")
+	ctxParams.Set("album", albumID.String())
+	if offset > 0 {
+		ctxParams.Set("offset", strconv.Itoa(offset))
+	}
+	ctxQuery := ctxParams.Encode()
+
 	s.render(w, r, "album.html", struct {
 		baseData
 		Album    *photo.Album
 		Photos   []*photo.Photo
 		Total    int
+		CtxQuery template.URL
 		PrevPage string
 		NextPage string
 		PageInfo string
@@ -87,6 +144,7 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 		Album:    album,
 		Photos:   photos,
 		Total:    total,
+		CtxQuery: template.URL(ctxQuery),
 		PrevPage: prevPage,
 		NextPage: nextPage,
 		PageInfo: pageInfo(offset, pageSize, total),
