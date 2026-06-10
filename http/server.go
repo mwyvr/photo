@@ -57,17 +57,21 @@ type Server struct {
 
 	// LibraryRoot is the base directory where photo files are stored.
 	LibraryRoot string
+
+	// authLimiter rate-limits failed authentication attempts per IP.
+	authLimiter *rateLimiter
 }
 
 // New returns a configured Server. Call ListenAndServe() to start accepting connections.
 func New(addr string) *Server {
 	s := &Server{
-		TokenTTL: 30 * 24 * time.Hour,
+		TokenTTL:    30 * 24 * time.Hour,
+		authLimiter: newRateLimiter(5, time.Minute),
 	}
 	s.router = http.NewServeMux()
 	s.server = &http.Server{
 		Addr:         addr,
-		Handler:      s.router,
+		Handler:      accessLog(s.router), // wrap entire router with access logging
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -77,9 +81,9 @@ func New(addr string) *Server {
 }
 
 func (s *Server) registerRoutes() {
-	// Public routes (no auth required).
+	// Public routes — login endpoints are rate-limited against brute force.
 	s.router.HandleFunc("POST /api/v1/register", s.handleRegister)
-	s.router.HandleFunc("POST /api/v1/login", s.handleLogin)
+	s.router.HandleFunc("POST /api/v1/login", s.authLimiter.rateLimit(s.handleLogin))
 
 	// Authenticated routes — wrapped in requireAuth middleware.
 	s.router.HandleFunc("DELETE /api/v1/logout", s.requireAuth(s.handleLogout))

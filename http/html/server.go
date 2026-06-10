@@ -28,6 +28,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mwyvr/kid"
@@ -50,11 +51,82 @@ type Server struct {
 
 	// LibraryRoot is the base directory for reading image files.
 	LibraryRoot string
+
+	// authLimiter rate-limits failed web UI login attempts per IP.
+	authLimiter *htmlRateLimiter
+}
+
+// htmlRateLimiter is a simple per-IP failed-login counter for the web UI.
+// It mirrors the logic in http/middleware.go without importing that package.
+type htmlRateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string]*htmlIPAttempts
+	max      int
+	window   time.Duration
+}
+
+type htmlIPAttempts struct {
+	count     int
+	windowEnd time.Time
+}
+
+func newHTMLRateLimiter() *htmlRateLimiter {
+	rl := &htmlRateLimiter{
+		attempts: make(map[string]*htmlIPAttempts),
+		max:      5,
+		window:   time.Minute,
+	}
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			rl.mu.Lock()
+			now := time.Now()
+			for ip, a := range rl.attempts {
+				if now.After(a.windowEnd) {
+					delete(rl.attempts, ip)
+				}
+			}
+			rl.mu.Unlock()
+		}
+	}()
+	return rl
+}
+
+func (rl *htmlRateLimiter) allow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	a, ok := rl.attempts[ip]
+	if !ok || time.Now().After(a.windowEnd) {
+		return true
+	}
+	return a.count < rl.max
+}
+
+func (rl *htmlRateLimiter) record(ip string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	a, ok := rl.attempts[ip]
+	if !ok || now.After(a.windowEnd) {
+		rl.attempts[ip] = &htmlIPAttempts{count: 1, windowEnd: now.Add(rl.window)}
+		return
+	}
+	a.count++
 }
 
 // New returns a configured Server ready to register routes.
 func New() (*Server, error) {
-	return &Server{}, nil
+	return &Server{authLimiter: newHTMLRateLimiter()}, nil
+}
+
+// isSecureRequest returns true when the original request used HTTPS,
+// either directly or via a reverse proxy sending X-Forwarded-Proto: https.
+func isSecureRequest(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // RegisterRoutes registers all HTML UI routes on mux.
