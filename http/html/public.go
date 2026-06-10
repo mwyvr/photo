@@ -399,7 +399,7 @@ func resizeJPEGBytes(imgData []byte, maxDim int) ([]byte, error) {
 	draw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
 
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 85}); err != nil {
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: thumbQuality}); err != nil {
 		return nil, fmt.Errorf("encode jpeg: %w", err)
 	}
 	return buf.Bytes(), nil
