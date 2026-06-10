@@ -394,6 +394,18 @@ func NewAlbumService() *AlbumService {
 	return &AlbumService{albums: make(map[kid.ID]*photo.Album)}
 }
 
+func (s *AlbumService) FindAlbumBySlug(ctx context.Context, slug string) (*photo.Album, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, a := range s.albums {
+		if a.Slug == slug {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, photo.Errorf(photo.ENOTFOUND, "album not found: %s", slug)
+}
+
 func (s *AlbumService) FindAlbumByID(ctx context.Context, id kid.ID) (*photo.Album, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -423,6 +435,9 @@ func (s *AlbumService) CreateAlbum(ctx context.Context, a *photo.Album) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a.ID = kid.New()
+	if a.Slug == "" {
+		a.Slug = photo.Slugify(a.Name)
+	}
 	a.CreatedAt = time.Now()
 	a.UpdatedAt = time.Now()
 	cp := *a

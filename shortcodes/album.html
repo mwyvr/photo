@@ -2,12 +2,12 @@
   album shortcode — links to an album page in the photo library.
 
   Usage:
-    {{< album id="06bq8abc123defgh" >}}
-    {{< album id="06bq8abc123defgh" title="France 2024" >}}
-    {{< album id="06bq8abc123defgh" title="France 2024" thumb="true" >}}
+    {{< album slug="france-2024" >}}
+    {{< album slug="france-2024" title="France 2024" >}}
+    {{< album slug="france-2024" title="France 2024" thumb="true" >}}
 
   Parameters:
-    id     (required) kid ID of the album
+    slug   (required) URL slug of the album (shown in 'photo album list')
     title  (optional) link text; defaults to "View album"
     thumb  (optional) "true" shows the album cover thumbnail above the link
 
@@ -16,12 +16,12 @@
     photoServer = "https://photos.yourdomain.com"
 */}}
 
-{{- $id    := .Get "id" -}}
+{{- $slug  := .Get "slug" -}}
 {{- $title := .Get "title" | default "View album" -}}
 {{- $thumb := .Get "thumb" | default "false" -}}
 
-{{- if not $id -}}
-  {{ errorf "album shortcode: id parameter is required" }}
+{{- if not $slug -}}
+  {{ errorf "album shortcode: slug parameter is required" }}
 {{- end -}}
 
 {{- $base := "" -}}
@@ -31,16 +31,12 @@
   {{- $base = "https://photos.example.com" -}}
 {{- end -}}
 
-{{- $albumURL := printf "%s/albums/%s" $base $id -}}
-{{- $coverURL := printf "%s/p/%s/thumb" $base $id -}}
+{{- $albumURL := printf "%s/albums/%s" $base $slug -}}
 
 <span class="album-embed">
   {{- if eq $thumb "true" }}
+  {{- /* For thumb we need the cover photo ID — link to album without cover image */}}
   <a href="{{ $albumURL }}" target="_blank" rel="noopener" class="album-embed-link">
-    <img src="{{ $coverURL }}"
-         alt="{{ $title }}"
-         loading="lazy"
-         class="album-embed-thumb">
     <span>{{ $title }}</span>
   </a>
   {{- else }}

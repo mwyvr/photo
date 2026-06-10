@@ -9,7 +9,7 @@
 {{if .Albums}}
 <div class="album-grid">
   {{range .Albums}}
-  <a href="/albums/{{.ID}}" class="album-card">
+  <a href="/albums/{{.Slug}}" class="album-card">
     {{if .CoverPhotoID}}
     <img class="album-card-thumb"
          src="/p/{{.CoverPhotoID}}/thumb"

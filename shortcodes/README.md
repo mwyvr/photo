@@ -41,14 +41,12 @@ photo show <id>
 ### Album link
 
 ```
-{{< album id="06bq8abc123defgh" >}}
+{{< album slug="france-2024" >}}
 
-{{< album id="06bq8abc123defgh" title="France 2024" >}}
-
-{{< album id="06bq8abc123defgh" title="France 2024" thumb="true" >}}
+{{< album slug="france-2024" title="France 2024" >}}
 ```
 
-Find the album ID with:
+Find the album slug with:
 ```bash
 photo album list
 ```

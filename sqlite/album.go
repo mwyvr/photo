@@ -15,6 +15,47 @@ type AlbumService struct{ db *DB }
 
 func NewAlbumService(db *DB) *AlbumService { return &AlbumService{db: db} }
 
+// MigrateExistingSlugs populates slug for any albums that have an empty slug
+// (i.e. albums created before 0006_album_slugs.sql was applied).
+// Called once at server startup after migrations.
+func (s *AlbumService) MigrateExistingSlugs(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `SELECT id, name FROM albums WHERE slug = ''`)
+	if err != nil {
+		return fmt.Errorf("migrate slugs: query: %w", err)
+	}
+	defer rows.Close()
+
+	type row struct {
+		id   string
+		name string
+	}
+	var needSlug []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.name); err != nil {
+			return err
+		}
+		needSlug = append(needSlug, r)
+	}
+	rows.Close()
+
+	for _, r := range needSlug {
+		slug := s.uniqueSlug(ctx, tx, photo.Slugify(r.name), "")
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE albums SET slug = ? WHERE id = ?`, slug, r.id,
+		); err != nil {
+			return fmt.Errorf("migrate slug for %s: %w", r.id, err)
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *AlbumService) FindAlbumByID(ctx context.Context, id kid.ID) (*photo.Album, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -22,6 +63,28 @@ func (s *AlbumService) FindAlbumByID(ctx context.Context, id kid.ID) (*photo.Alb
 	}
 	defer tx.Rollback()
 	return findAlbumByID(ctx, tx, id)
+}
+
+func (s *AlbumService) FindAlbumBySlug(ctx context.Context, slug string) (*photo.Album, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	row := tx.QueryRowContext(ctx, `
+		SELECT a.id, a.user_id, a.name, a.slug, a.description, a.cover_photo_id,
+		       COUNT(ap.photo_id) AS photo_count,
+		       a.created_at, a.updated_at
+		FROM albums a
+		LEFT JOIN album_photos ap ON ap.album_id = a.id
+		WHERE a.slug = ?
+		GROUP BY a.id
+	`, slug)
+	a, err := scanAlbum(row)
+	if err == sql.ErrNoRows {
+		return nil, photo.Errorf(photo.ENOTFOUND, "album not found: %s", slug)
+	}
+	return a, err
 }
 
 func (s *AlbumService) FindAlbums(ctx context.Context, filter photo.AlbumFilter) ([]*photo.Album, int, error) {
@@ -48,7 +111,7 @@ func (s *AlbumService) FindAlbums(ctx context.Context, filter photo.AlbumFilter)
 	}
 
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT a.id, a.user_id, a.name, a.description, a.cover_photo_id,
+		SELECT a.id, a.user_id, a.name, a.slug, a.description, a.cover_photo_id,
 		       COUNT(ap.photo_id) AS photo_count,
 		       a.created_at, a.updated_at
 		FROM albums a
@@ -75,6 +138,10 @@ func (s *AlbumService) FindAlbums(ctx context.Context, filter photo.AlbumFilter)
 }
 
 func (s *AlbumService) CreateAlbum(ctx context.Context, a *photo.Album) error {
+	// Derive slug from name before validation.
+	if a.Slug == "" && a.Name != "" {
+		a.Slug = photo.Slugify(a.Name)
+	}
 	if err := a.Validate(); err != nil {
 		return err
 	}
@@ -84,20 +151,43 @@ func (s *AlbumService) CreateAlbum(ctx context.Context, a *photo.Album) error {
 	}
 	defer tx.Rollback()
 
+	// Ensure slug uniqueness — append -2, -3 etc if needed.
+	a.Slug = s.uniqueSlug(ctx, tx, a.Slug, "")
+
 	a.ID = kid.New()
 	a.CreatedAt = tx.now
 	a.UpdatedAt = tx.now
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO albums (id, user_id, name, description, cover_photo_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.UserID, a.Name, a.Description, nullKidID(a.CoverPhotoID),
+		INSERT INTO albums (id, user_id, name, slug, description, cover_photo_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.UserID, a.Name, a.Slug, a.Description, nullKidID(a.CoverPhotoID),
 		tx.nowStr(), tx.nowStr(),
 	)
 	if err != nil {
 		return FormatError(err)
 	}
 	return tx.Commit()
+}
+
+// uniqueSlug ensures slug is not already in use, appending -2, -3 etc if needed.
+// excludeID skips the check for a specific album (used during update, unused here).
+func (s *AlbumService) uniqueSlug(ctx context.Context, tx *Tx, base, excludeID string) string {
+	slug := base
+	for i := 2; ; i++ {
+		var count int
+		q := `SELECT COUNT(*) FROM albums WHERE slug = ?`
+		args := []interface{}{slug}
+		if excludeID != "" {
+			q += ` AND id != ?`
+			args = append(args, excludeID)
+		}
+		tx.QueryRowContext(ctx, q, args...).Scan(&count) //nolint
+		if count == 0 {
+			return slug
+		}
+		slug = fmt.Sprintf("%s-%d", base, i)
+	}
 }
 
 func (s *AlbumService) UpdateAlbum(ctx context.Context, id kid.ID, upd photo.AlbumUpdate) (*photo.Album, error) {
@@ -113,13 +203,14 @@ func (s *AlbumService) UpdateAlbum(ctx context.Context, id kid.ID, upd photo.Alb
 	}
 	if v := upd.Name; v != nil {
 		a.Name = *v
+		// Slug is immutable — name changes do not update the slug.
 	}
 	if v := upd.Description; v != nil {
 		a.Description = *v
 	}
 	if upd.CoverPhotoID != nil {
 		if upd.CoverPhotoID.IsNil() {
-			a.CoverPhotoID = nil // clear
+			a.CoverPhotoID = nil
 		} else {
 			a.CoverPhotoID = upd.CoverPhotoID
 		}
@@ -161,7 +252,6 @@ func (s *AlbumService) AddPhoto(ctx context.Context, albumID, photoID kid.ID) er
 	}
 	defer tx.Rollback()
 
-	// Verify both exist.
 	if _, err := findAlbumByID(ctx, tx, albumID); err != nil {
 		return err
 	}
@@ -169,11 +259,10 @@ func (s *AlbumService) AddPhoto(ctx context.Context, albumID, photoID kid.ID) er
 		return err
 	}
 
-	// Append at end: position = max(position) + 1, or 1 if album is empty.
 	var maxPos int
 	tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(position), 0) FROM album_photos WHERE album_id = ?`, albumID,
-	).Scan(&maxPos) //nolint:errcheck
+	).Scan(&maxPos) //nolint
 
 	_, err = tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO album_photos (album_id, photo_id, position) VALUES (?, ?, ?)`,
@@ -212,10 +301,8 @@ func (s *AlbumService) MovePhoto(ctx context.Context, albumID, photoID, afterPho
 	}
 	defer tx.Rollback()
 
-	// Determine the target position.
 	var newPos int
 	if afterPhotoID.IsNil() {
-		// Move to beginning: position = 0 (will be renormalised below).
 		newPos = 0
 	} else {
 		err = tx.QueryRowContext(ctx,
@@ -229,7 +316,6 @@ func (s *AlbumService) MovePhoto(ctx context.Context, albumID, photoID, afterPho
 		}
 	}
 
-	// Shift photos after the target position up by 1 to make room.
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE album_photos SET position = position + 1
 		WHERE album_id = ? AND position > ?`, albumID, newPos,
@@ -237,7 +323,6 @@ func (s *AlbumService) MovePhoto(ctx context.Context, albumID, photoID, afterPho
 		return fmt.Errorf("shift positions: %w", err)
 	}
 
-	// Place the moved photo at newPos + 1.
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE album_photos SET position = ?
 		WHERE album_id = ? AND photo_id = ?`, newPos+1, albumID, photoID,
@@ -293,7 +378,7 @@ func (s *AlbumService) FindAlbumPhotos(ctx context.Context, albumID kid.ID, offs
 
 func findAlbumByID(ctx context.Context, tx *Tx, id kid.ID) (*photo.Album, error) {
 	row := tx.QueryRowContext(ctx, `
-		SELECT a.id, a.user_id, a.name, a.description, a.cover_photo_id,
+		SELECT a.id, a.user_id, a.name, a.slug, a.description, a.cover_photo_id,
 		       COUNT(ap.photo_id) AS photo_count,
 		       a.created_at, a.updated_at
 		FROM albums a
@@ -318,7 +403,7 @@ func scanAlbum(s albumScanner) (*photo.Album, error) {
 	var createdAt, updatedAt NullTime
 
 	err := s.Scan(
-		&a.ID, &a.UserID, &a.Name, &a.Description, &coverPhotoID,
+		&a.ID, &a.UserID, &a.Name, &a.Slug, &a.Description, &coverPhotoID,
 		&a.PhotoCount,
 		&createdAt, &updatedAt,
 	)

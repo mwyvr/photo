@@ -70,6 +70,11 @@ func run(ctx context.Context) error {
 	statusSvc := sqlite.NewStatusService(db)
 	albumSvc := sqlite.NewAlbumService(db)
 
+	// Populate slugs for any albums created before migration 0006.
+	if err := albumSvc.MigrateExistingSlugs(ctx); err != nil {
+		return fmt.Errorf("migrate album slugs: %w", err)
+	}
+
 	// Build EXIF extractor.
 	extractor := exif.NewExtractor("")
 	if err := extractor.CheckDependency(); err != nil {

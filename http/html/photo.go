@@ -288,10 +288,17 @@ func (s *Server) adjacentInGrid(r *http.Request, currentID kid.ID, userID kid.ID
 
 // adjacentInAlbum finds the prev/next photo IDs within an album.
 func (s *Server) adjacentInAlbum(r *http.Request, currentID kid.ID, authed bool, albumIDStr string, q url.Values, ctxParams url.Values) (prevURL, nextURL string) {
-	albumID, err := kid.FromString(albumIDStr)
+	// Resolve album by slug or kid ID.
+	album, err := s.AlbumService.FindAlbumBySlug(r.Context(), albumIDStr)
+	if err != nil {
+		if id, idErr := kid.FromString(albumIDStr); idErr == nil {
+			album, err = s.AlbumService.FindAlbumByID(r.Context(), id)
+		}
+	}
 	if err != nil {
 		return
 	}
+	albumID := album.ID
 	offset, _ := strconv.Atoi(q.Get("offset"))
 
 	photos, total, err := s.AlbumService.FindAlbumPhotos(r.Context(), albumID, offset, pageSize)

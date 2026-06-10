@@ -14,6 +14,7 @@ import (
 type albumJSON struct {
 	ID           string     `json:"id"`
 	Name         string     `json:"name"`
+	Slug         string     `json:"slug"`
 	Description  string     `json:"description"`
 	CoverPhotoID *string    `json:"coverPhotoId,omitempty"`
 	PhotoCount   int        `json:"photoCount"`
@@ -103,11 +104,11 @@ func runAlbumList(ctx context.Context, c *client, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tName\tPhotos\tCreated")
-	fmt.Fprintln(w, "──\t────\t──────\t───────")
+	fmt.Fprintln(w, "Slug\tName\tPhotos\tCreated")
+	fmt.Fprintln(w, "────\t────\t──────\t───────")
 	for _, a := range resp.Albums {
 		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n",
-			a.ID, a.Name, a.PhotoCount,
+			a.Slug, a.Name, a.PhotoCount,
 			a.CreatedAt.Format("2006-01-02"),
 		)
 	}
@@ -142,7 +143,7 @@ Flags:
 	if err := c.do(ctx, "POST", "/api/v1/albums", body, &a); err != nil {
 		return fmt.Errorf("album create: %w", err)
 	}
-	fmt.Printf("Created album %q (%s).\n", a.Name, a.ID)
+	fmt.Printf("Created album %q (slug: %s).\n", a.Name, a.Slug)
 	return nil
 }
 
@@ -162,6 +163,7 @@ func runAlbumShow(ctx context.Context, c *client, args []string) error {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "ID:\t%s\n", a.ID)
+	fmt.Fprintf(w, "Slug:\t%s\n", a.Slug)
 	fmt.Fprintf(w, "Name:\t%s\n", a.Name)
 	if a.Description != "" {
 		fmt.Fprintf(w, "Description:\t%s\n", a.Description)

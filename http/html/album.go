@@ -66,13 +66,19 @@ func (s *Server) filterPublicAlbums(r *http.Request, albums []*photo.Album) []*p
 
 func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 	raw := r.PathValue("id")
-	albumID, err := kid.FromString(raw)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
 
-	album, err := s.AlbumService.FindAlbumByID(r.Context(), albumID)
+	// Try slug first, fall back to kid ID.
+	var album *photo.Album
+	var err error
+	album, err = s.AlbumService.FindAlbumBySlug(r.Context(), raw)
+	if err != nil {
+		if photo.ErrorCode(err) == photo.ENOTFOUND {
+			// Try as kid ID.
+			if id, idErr := kid.FromString(raw); idErr == nil {
+				album, err = s.AlbumService.FindAlbumByID(r.Context(), id)
+			}
+		}
+	}
 	if err != nil {
 		if photo.ErrorCode(err) == photo.ENOTFOUND {
 			http.NotFound(w, r)
@@ -85,7 +91,7 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 	_, authed := s.authenticatedUserID(r)
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
-	photos, total, err := s.AlbumService.FindAlbumPhotos(r.Context(), albumID, offset, pageSize)
+	photos, total, err := s.AlbumService.FindAlbumPhotos(r.Context(), album.ID, offset, pageSize)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -124,7 +130,7 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 	// Build context query for detail page navigation.
 	ctxParams := url.Values{}
 	ctxParams.Set("ctx", "album")
-	ctxParams.Set("album", albumID.String())
+	ctxParams.Set("album", album.Slug)
 	if offset > 0 {
 		ctxParams.Set("offset", strconv.Itoa(offset))
 	}

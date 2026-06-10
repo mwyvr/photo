@@ -76,11 +76,8 @@ func (s *Server) handleCreateAlbum(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetAlbum(w http.ResponseWriter, r *http.Request) {
-	id, ok := parsePathID(w, r, "id")
-	if !ok {
-		return
-	}
-	a, err := s.AlbumService.FindAlbumByID(r.Context(), id)
+	idOrSlug := r.PathValue("id")
+	a, err := s.resolveAlbum(r, idOrSlug)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -94,11 +91,8 @@ func (s *Server) handleGetAlbum(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateAlbum(w http.ResponseWriter, r *http.Request) {
-	id, ok := parsePathID(w, r, "id")
-	if !ok {
-		return
-	}
-	a, err := s.AlbumService.FindAlbumByID(r.Context(), id)
+	idOrSlug := r.PathValue("id")
+	a, err := s.resolveAlbum(r, idOrSlug)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -138,7 +132,7 @@ func (s *Server) handleUpdateAlbum(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updated, err := s.AlbumService.UpdateAlbum(r.Context(), id, upd)
+	updated, err := s.AlbumService.UpdateAlbum(r.Context(), a.ID, upd)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -147,11 +141,8 @@ func (s *Server) handleUpdateAlbum(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteAlbum(w http.ResponseWriter, r *http.Request) {
-	id, ok := parsePathID(w, r, "id")
-	if !ok {
-		return
-	}
-	a, err := s.AlbumService.FindAlbumByID(r.Context(), id)
+	idOrSlug := r.PathValue("id")
+	a, err := s.resolveAlbum(r, idOrSlug)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -161,7 +152,7 @@ func (s *Server) handleDeleteAlbum(w http.ResponseWriter, r *http.Request) {
 		respondError(w, photo.Errorf(photo.EFORBIDDEN, "access denied"))
 		return
 	}
-	if err := s.AlbumService.DeleteAlbum(r.Context(), id); err != nil {
+	if err := s.AlbumService.DeleteAlbum(r.Context(), a.ID); err != nil {
 		respondError(w, err)
 		return
 	}
@@ -169,11 +160,8 @@ func (s *Server) handleDeleteAlbum(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListAlbumPhotos(w http.ResponseWriter, r *http.Request) {
-	id, ok := parsePathID(w, r, "id")
-	if !ok {
-		return
-	}
-	a, err := s.AlbumService.FindAlbumByID(r.Context(), id)
+	idOrSlug := r.PathValue("id")
+	a, err := s.resolveAlbum(r, idOrSlug)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -196,7 +184,7 @@ func (s *Server) handleListAlbumPhotos(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	photos, total, err := s.AlbumService.FindAlbumPhotos(r.Context(), id, offset, limit)
+	photos, total, err := s.AlbumService.FindAlbumPhotos(r.Context(), a.ID, offset, limit)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -210,19 +198,20 @@ func (s *Server) handleListAlbumPhotos(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddPhotoToAlbum(w http.ResponseWriter, r *http.Request) {
-	albumID, ok := parsePathID(w, r, "id")
-	if !ok {
+	a, err := s.resolveAlbum(r, r.PathValue("id"))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if a.UserID != userIDFromContext(r.Context()) {
+		respondError(w, photo.Errorf(photo.EFORBIDDEN, "access denied"))
 		return
 	}
 	photoID, ok := parsePathID(w, r, "photoId")
 	if !ok {
 		return
 	}
-	if err := s.ownsAlbum(r, albumID); err != nil {
-		respondError(w, err)
-		return
-	}
-	if err := s.AlbumService.AddPhoto(r.Context(), albumID, photoID); err != nil {
+	if err := s.AlbumService.AddPhoto(r.Context(), a.ID, photoID); err != nil {
 		respondError(w, err)
 		return
 	}
@@ -230,19 +219,20 @@ func (s *Server) handleAddPhotoToAlbum(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemovePhotoFromAlbum(w http.ResponseWriter, r *http.Request) {
-	albumID, ok := parsePathID(w, r, "id")
-	if !ok {
+	a, err := s.resolveAlbum(r, r.PathValue("id"))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if a.UserID != userIDFromContext(r.Context()) {
+		respondError(w, photo.Errorf(photo.EFORBIDDEN, "access denied"))
 		return
 	}
 	photoID, ok := parsePathID(w, r, "photoId")
 	if !ok {
 		return
 	}
-	if err := s.ownsAlbum(r, albumID); err != nil {
-		respondError(w, err)
-		return
-	}
-	if err := s.AlbumService.RemovePhoto(r.Context(), albumID, photoID); err != nil {
+	if err := s.AlbumService.RemovePhoto(r.Context(), a.ID, photoID); err != nil {
 		respondError(w, err)
 		return
 	}
@@ -250,21 +240,22 @@ func (s *Server) handleRemovePhotoFromAlbum(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleMovePhotoInAlbum(w http.ResponseWriter, r *http.Request) {
-	albumID, ok := parsePathID(w, r, "id")
-	if !ok {
+	a, err := s.resolveAlbum(r, r.PathValue("id"))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if a.UserID != userIDFromContext(r.Context()) {
+		respondError(w, photo.Errorf(photo.EFORBIDDEN, "access denied"))
 		return
 	}
 	photoID, ok := parsePathID(w, r, "photoId")
 	if !ok {
 		return
 	}
-	if err := s.ownsAlbum(r, albumID); err != nil {
-		respondError(w, err)
-		return
-	}
 
 	var body struct {
-		AfterPhotoID string `json:"afterPhotoId"` // "" to move to beginning
+		AfterPhotoID string `json:"afterPhotoId"`
 	}
 	json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
 
@@ -278,7 +269,7 @@ func (s *Server) handleMovePhotoInAlbum(w http.ResponseWriter, r *http.Request) 
 		afterID = id
 	}
 
-	if err := s.AlbumService.MovePhoto(r.Context(), albumID, photoID, afterID); err != nil {
+	if err := s.AlbumService.MovePhoto(r.Context(), a.ID, photoID, afterID); err != nil {
 		respondError(w, err)
 		return
 	}
@@ -286,20 +277,20 @@ func (s *Server) handleMovePhotoInAlbum(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleSetAlbumCover(w http.ResponseWriter, r *http.Request) {
-	albumID, ok := parsePathID(w, r, "id")
-	if !ok {
+	a, err := s.resolveAlbum(r, r.PathValue("id"))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if a.UserID != userIDFromContext(r.Context()) {
+		respondError(w, photo.Errorf(photo.EFORBIDDEN, "access denied"))
 		return
 	}
 	photoID, ok := parsePathID(w, r, "photoId")
 	if !ok {
 		return
 	}
-	if err := s.ownsAlbum(r, albumID); err != nil {
-		respondError(w, err)
-		return
-	}
-
-	updated, err := s.AlbumService.UpdateAlbum(r.Context(), albumID, photo.AlbumUpdate{
+	updated, err := s.AlbumService.UpdateAlbum(r.Context(), a.ID, photo.AlbumUpdate{
 		CoverPhotoID: &photoID,
 	})
 	if err != nil {
@@ -309,9 +300,20 @@ func (s *Server) handleSetAlbumCover(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, updated)
 }
 
-// ownsAlbum is a helper that checks the authenticated user owns the album.
-func (s *Server) ownsAlbum(r *http.Request, albumID kid.ID) error {
-	a, err := s.AlbumService.FindAlbumByID(r.Context(), albumID)
+// resolveAlbum looks up an album by either its slug or kid ID string.
+// This lets API callers use /api/v1/albums/travel or /api/v1/albums/06gb...
+func (s *Server) resolveAlbum(r *http.Request, idOrSlug string) (*photo.Album, error) {
+	// Try as kid ID first.
+	if id, err := kid.FromString(idOrSlug); err == nil {
+		return s.AlbumService.FindAlbumByID(r.Context(), id)
+	}
+	// Fall back to slug lookup.
+	return s.AlbumService.FindAlbumBySlug(r.Context(), idOrSlug)
+}
+
+// ownsAlbum checks the authenticated user owns the album identified by slug or ID.
+func (s *Server) ownsAlbum(r *http.Request, idOrSlug string) error {
+	a, err := s.resolveAlbum(r, idOrSlug)
 	if err != nil {
 		return err
 	}
