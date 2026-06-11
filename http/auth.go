@@ -223,7 +223,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	u, err := s.UserService.FindUserByUsername(r.Context(), req.Username)
 	if err != nil {
-		// Return 401, not 404, to avoid username enumeration.
+		// Run a dummy bcrypt comparison to equalise response time regardless
+		// of whether the username exists, preventing timing-based enumeration.
+		bcrypt.CompareHashAndPassword([]byte("$2a$10$dummyhashfortimingXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"), []byte(req.Password)) //nolint:errcheck
 		respondError(w, photo.Errorf(photo.EUNAUTHORIZED, "invalid username or password"))
 		return
 	}

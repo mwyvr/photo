@@ -102,6 +102,7 @@ func run(ctx context.Context) error {
 	srv.JWTSecret = cfg.JWTSecret
 	srv.LibraryRoot = cfg.LibraryRoot
 	srv.PublishDefault = cfg.PublishDefault
+	srv.TrustedProxy = cfg.TrustedProxy
 
 	// Build and register HTML UI.
 	ui, err := htmlui.New()
@@ -115,6 +116,7 @@ func run(ctx context.Context) error {
 	ui.StatusService = statusSvc
 	ui.JWTSecret = cfg.JWTSecret
 	ui.LibraryRoot = cfg.LibraryRoot
+	ui.TrustedProxy = cfg.TrustedProxy
 	ui.RegisterRoutes(srv.Router())
 
 	log.Printf("photod library:         %s", cfg.LibraryRoot)
@@ -144,6 +146,13 @@ type ServerConfig struct {
 	// overridden. RAW files always default to unpublished regardless of this setting.
 	// Defaults to false (private) on first run.
 	PublishDefault bool `json:"publishDefault"`
+
+	// TrustedProxy is the IP address of the reverse proxy (Mox, Caddy, etc.).
+	// When set, X-Forwarded-For is only trusted when the request comes from
+	// this address. Prevents clients from forging their IP for rate limit bypass.
+	// Use "127.0.0.1" when running behind a local proxy.
+	// Leave empty to trust X-Forwarded-For from any source (less secure).
+	TrustedProxy string `json:"trustedProxy,omitempty"`
 
 	// JWTSecret is the decoded form of JWTSecretHex. Not persisted.
 	JWTSecret []byte `json:"-"`

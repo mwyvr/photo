@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/mwyvr/kid"
 	"github.com/mwyvr/photo"
@@ -148,8 +149,17 @@ func (s *Server) handlePrivateThumb(w http.ResponseWriter, r *http.Request) {
 	serveImmutable(w, r, thumbPath, false)
 }
 
+// safeFilePath returns an error if joining root+rel would escape root.
+func safeFilePath(root, rel string) (string, error) {
+	full := filepath.Join(root, rel)
+	prefix := root + string(filepath.Separator)
+	if !strings.HasPrefix(full, prefix) {
+		return "", fmt.Errorf("path traversal: %q", rel)
+	}
+	return full, nil
+}
+
 // handlePrivatePhotoFile serves a photo file for authenticated users via cookie session.
-// Used by the detail page for private photos where Bearer tokens can't be used.
 func (s *Server) handlePrivatePhotoFile(w http.ResponseWriter, r *http.Request) {
 	userID, ok := s.authenticatedUserID(r)
 	if !ok {
@@ -167,8 +177,14 @@ func (s *Server) handlePrivatePhotoFile(w http.ResponseWriter, r *http.Request) 
 		http.NotFound(w, r)
 		return
 	}
+	fullPath, err := safeFilePath(s.LibraryRoot, p.StoredPath)
+	if err != nil {
+		log.Printf("serve file: %v", err)
+		http.NotFound(w, r)
+		return
+	}
 	cacheNoStore(w)
-	http.ServeFile(w, r, filepath.Join(s.LibraryRoot, p.StoredPath))
+	http.ServeFile(w, r, fullPath)
 }
 
 // handlePublicPhoto serves a browser-displayable version of a published photo.
@@ -180,7 +196,12 @@ func (s *Server) handlePublicPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	srcPath := filepath.Join(s.LibraryRoot, p.StoredPath)
+	srcPath, err := safeFilePath(s.LibraryRoot, p.StoredPath)
+	if err != nil {
+		log.Printf("public photo: %v", err)
+		http.NotFound(w, r)
+		return
+	}
 
 	if !p.IsRaw {
 		cacheImmutable(w, true)

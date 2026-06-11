@@ -81,6 +81,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 
 	u, err := s.UserService.FindUserByUsername(r.Context(), username)
 	if err != nil {
+		bcrypt.CompareHashAndPassword([]byte("$2a$10$dummyhashfortimingXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"), []byte(password)) //nolint:errcheck
 		renderError("Invalid username or password.")
 		return
 	}
@@ -110,7 +111,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   isSecureRequest(r),
+		Secure:   isSecureRequest(r, s.TrustedProxy),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  sess.ExpiresAt,
 	})

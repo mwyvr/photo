@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -51,6 +52,10 @@ type Server struct {
 
 	// LibraryRoot is the base directory for reading image files.
 	LibraryRoot string
+
+	// TrustedProxy is the IP of the reverse proxy. Passed through to
+	// isSecureRequest for correct Secure cookie handling.
+	TrustedProxy string
 
 	// authLimiter rate-limits failed web UI login attempts per IP.
 	authLimiter *htmlRateLimiter
@@ -120,11 +125,18 @@ func New() (*Server, error) {
 	return &Server{authLimiter: newHTMLRateLimiter()}, nil
 }
 
-// isSecureRequest returns true when the original request used HTTPS,
-// either directly or via a reverse proxy sending X-Forwarded-Proto: https.
-func isSecureRequest(r *http.Request) bool {
+// isSecureRequest returns true when the original request used HTTPS.
+// Only trusts X-Forwarded-Proto when the connection is from trustedProxy
+// (or trustedProxy is empty, meaning trust all).
+func isSecureRequest(r *http.Request, trustedProxy string) bool {
 	if r.TLS != nil {
 		return true
+	}
+	if trustedProxy != "" {
+		directIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if directIP != trustedProxy {
+			return false
+		}
 	}
 	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }

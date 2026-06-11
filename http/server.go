@@ -55,6 +55,10 @@ type Server struct {
 	// RAW files are always unpublished regardless of this setting.
 	PublishDefault bool
 
+	// TrustedProxy is the IP of the reverse proxy. When set, X-Forwarded-For
+	// is only trusted when the direct connection comes from this address.
+	TrustedProxy string
+
 	// LibraryRoot is the base directory where photo files are stored.
 	LibraryRoot string
 
@@ -65,17 +69,18 @@ type Server struct {
 // New returns a configured Server. Call ListenAndServe() to start accepting connections.
 func New(addr string) *Server {
 	s := &Server{
-		TokenTTL:    30 * 24 * time.Hour,
-		authLimiter: newRateLimiter(5, time.Minute),
+		TokenTTL: 30 * 24 * time.Hour,
 	}
 	s.router = http.NewServeMux()
 	s.server = &http.Server{
 		Addr:         addr,
-		Handler:      accessLog(s.router), // wrap entire router with access logging
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
+	// Initialise with empty trustedProxy for now; reinitialised in ListenAndServe
+	// once TrustedProxy field is set by the caller.
+	s.authLimiter = newRateLimiter(5, time.Minute, "")
 	s.registerRoutes()
 	return s
 }
@@ -114,6 +119,10 @@ func (s *Server) Router() *http.ServeMux {
 // TLS termination is handled by a reverse proxy (Caddy, Mox, nginx, etc.)
 // running in front of photod; photod itself always speaks plain HTTP.
 func (s *Server) ListenAndServe(ctx context.Context) error {
+	// Build middleware chain here so TrustedProxy is available.
+	s.authLimiter = newRateLimiter(5, time.Minute, s.TrustedProxy)
+	s.server.Handler = securityHeaders(accessLog(s.router, s.TrustedProxy))
+
 	go s.cleanupSessions(ctx)
 	go func() {
 		<-ctx.Done()

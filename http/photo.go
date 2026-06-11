@@ -2,11 +2,13 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mwyvr/photo"
@@ -123,6 +125,10 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// Strip any path components from the client-supplied filename.
+	// filepath.Base("../../etc/passwd") → "passwd", preventing traversal.
+	safeFilename := filepath.Base(header.Filename)
+
 	// Determine published state:
 	// - If ?published= is explicitly set, use that value.
 	// - Otherwise apply server default — but RAW files are always unpublished.
@@ -142,7 +148,7 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 		Published: published,
 	}
 
-	result := s.Importer.ImportReader(r.Context(), file, header.Filename, opts)
+	result := s.Importer.ImportReader(r.Context(), file, safeFilename, opts)
 	if result.Err != nil {
 		respondError(w, result.Err)
 		return
@@ -167,9 +173,18 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusCreated, result.Photo)
 }
 
+// safeFilePath joins libraryRoot and rel, returning an error if the result
+// would escape libraryRoot. Prevents path traversal via crafted StoredPath values.
+func safeFilePath(libraryRoot, rel string) (string, error) {
+	full := filepath.Join(libraryRoot, rel)
+	prefix := libraryRoot + string(filepath.Separator)
+	if !strings.HasPrefix(full, prefix) {
+		return "", fmt.Errorf("path traversal attempt: %q", rel)
+	}
+	return full, nil
+}
+
 // handleServePhotoFile serves the raw image file for an authenticated user.
-// Used by the web UI detail page for private (unpublished) photos.
-// Ownership is enforced — users can only access their own photos.
 func (s *Server) handleServePhotoFile(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePathID(w, r, "id")
 	if !ok {
@@ -188,7 +203,12 @@ func (s *Server) handleServePhotoFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPath := filepath.Join(s.LibraryRoot, p.StoredPath)
+	fullPath, err := safeFilePath(s.LibraryRoot, p.StoredPath)
+	if err != nil {
+		log.Printf("serve photo file: %v", err)
+		respondError(w, photo.Errorf(photo.EINTERNAL, "invalid file path"))
+		return
+	}
 	http.ServeFile(w, r, fullPath)
 }
 

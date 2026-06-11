@@ -31,20 +31,16 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 }
 
 // accessLog wraps a handler and writes one Apache Combined Log Format line per
-// request. The real client IP is taken from X-Forwarded-For when present,
-// which is correct when running behind a reverse proxy (Mox, Caddy, nginx).
-//
-// Format:
-//
-//	<ip> - - [<time>] "<method> <path> <proto>" <status> <bytes> "<referer>" "<user-agent>"
-func accessLog(next http.Handler) http.Handler {
+// request. trustedProxy is the IP of the reverse proxy; if non-empty,
+// X-Forwarded-For is only trusted when the direct connection is from that IP.
+func accessLog(next http.Handler, trustedProxy string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 
 		next.ServeHTTP(rw, r)
 
-		ip := realIP(r)
+		ip := realIP(r, trustedProxy)
 		ref := r.Referer()
 		if ref == "" {
 			ref = "-"
@@ -67,48 +63,75 @@ func accessLog(next http.Handler) http.Handler {
 	})
 }
 
-// realIP returns the client IP from X-Forwarded-For (first entry) when set,
-// otherwise falls back to RemoteAddr. Strips port from RemoteAddr.
-func realIP(r *http.Request) string {
+// realIP returns the client IP. X-Forwarded-For is only trusted when
+// trustedProxy is empty (trust all) or matches the direct connection IP.
+func realIP(r *http.Request, trustedProxy string) string {
+	directIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+
+	// Only trust X-Forwarded-For from the configured proxy address.
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For may be a comma-separated list; take the leftmost.
-		if idx := strings.Index(xff, ","); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
+		if trustedProxy == "" || directIP == trustedProxy {
+			if idx := strings.Index(xff, ","); idx != -1 {
+				return strings.TrimSpace(xff[:idx])
+			}
+			return strings.TrimSpace(xff)
 		}
-		return strings.TrimSpace(xff)
 	}
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	if directIP != "" {
+		return directIP
 	}
-	return ip
+	return r.RemoteAddr
 }
 
-// isBehindProxy returns true when the request arrived via a reverse proxy,
-// indicated by the presence of X-Forwarded-Proto.
-func isBehindProxy(r *http.Request) bool {
-	return r.Header.Get("X-Forwarded-Proto") != ""
+// securityHeaders adds standard security response headers to every request.
+// These mitigate clickjacking, MIME sniffing, XSS, and information leakage.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+
+		// Prevent browsers from MIME-sniffing away from declared Content-Type.
+		h.Set("X-Content-Type-Options", "nosniff")
+
+		// Deny embedding in iframes — prevents clickjacking.
+		h.Set("X-Frame-Options", "DENY")
+
+		// Don't send the Referer header to external sites.
+		h.Set("Referrer-Policy", "same-origin")
+
+		// Content Security Policy:
+		// - default-src 'self': only load resources from this origin
+		// - img-src 'self' data:: allow inline data URIs for thumbnails
+		// - style-src 'self' 'unsafe-inline': allow inline styles (used by onerror handlers)
+		// - script-src 'self' 'unsafe-inline': required for the inline lightbox/nav JS
+		// - frame-ancestors 'none': belt-and-suspenders against clickjacking
+		// Note: 'unsafe-inline' for scripts is needed because the detail page has inline JS.
+		// A future improvement would move JS to external files and use a nonce.
+		h.Set("Content-Security-Policy",
+			"default-src 'self'; "+
+				"img-src 'self' data:; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"script-src 'self' 'unsafe-inline'; "+
+				"frame-ancestors 'none'",
+		)
+
+		// Remove the Server header to avoid leaking Go/version info.
+		h.Set("Server", "photod")
+
+		next.ServeHTTP(w, r)
+	})
 }
 
-// isSecureRequest returns true when the original request used HTTPS,
-// either directly (r.TLS != nil) or via a reverse proxy (X-Forwarded-Proto: https).
-func isSecureRequest(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-}
 
-// --- Rate limiting ----------------------------------------------------------
 
 // rateLimiter tracks failed authentication attempts per IP address.
 // After maxAttempts failures within window, further attempts are rejected
 // with 429 Too Many Requests for the remainder of the window.
 type rateLimiter struct {
-	mu       sync.Mutex
-	attempts map[string]*ipAttempts
-	max      int
-	window   time.Duration
+	mu           sync.Mutex
+	attempts     map[string]*ipAttempts
+	max          int
+	window       time.Duration
+	trustedProxy string
 }
 
 type ipAttempts struct {
@@ -116,11 +139,12 @@ type ipAttempts struct {
 	windowEnd time.Time
 }
 
-func newRateLimiter(max int, window time.Duration) *rateLimiter {
+func newRateLimiter(max int, window time.Duration, trustedProxy string) *rateLimiter {
 	rl := &rateLimiter{
-		attempts: make(map[string]*ipAttempts),
-		max:      max,
-		window:   window,
+		attempts:     make(map[string]*ipAttempts),
+		max:          max,
+		window:       window,
+		trustedProxy: trustedProxy,
 	}
 	go rl.cleanup()
 	return rl
@@ -176,7 +200,7 @@ func (rl *rateLimiter) cleanup() {
 // On subsequent requests that exceed the limit, returns 429 immediately.
 func (rl *rateLimiter) rateLimit(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := realIP(r)
+		ip := realIP(r, rl.trustedProxy)
 		if !rl.allow(ip) {
 			http.Error(w, fmt.Sprintf(`{"error":"too many failed attempts","code":"rate_limited"}`),
 				http.StatusTooManyRequests)
