@@ -141,6 +141,10 @@ type PhotoFilter struct {
 	// view in a shared library. Has no effect if UserID is unset.
 	IncludeOthersPublished bool
 
+	// MissingLocation, when true, filters to photos that have GPS
+	// coordinates but no location name (candidates for regeocoding).
+	MissingLocation *bool
+
 	Offset int
 	Limit  int
 }

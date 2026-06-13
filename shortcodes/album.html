@@ -1,5 +1,6 @@
 {{/*
-  album shortcode — links to an album page in the photo library.
+  album shortcode — links to an album page in the photo library, optionally
+  showing the album's cover photo thumbnail.
 
   Usage:
     {{< album slug="france-2024" >}}
@@ -10,6 +11,11 @@
     slug   (required) URL slug of the album (shown in 'photo album list')
     title  (optional) link text; defaults to "View album"
     thumb  (optional) "true" shows the album cover thumbnail above the link
+
+  The cover thumbnail is served at /albums/{slug}/cover and resolves
+  automatically server-side — no photo ID needed. If the album has no cover
+  photo, or the cover photo isn't published, the image fails to load; pair
+  with onerror handling in your site CSS/JS if you want a placeholder.
 
   Set site.Params.photoServer in your Hugo config to your photo server base URL:
     [params]
@@ -32,11 +38,16 @@
 {{- end -}}
 
 {{- $albumURL := printf "%s/albums/%s" $base $slug -}}
+{{- $coverURL := printf "%s/albums/%s/cover" $base $slug -}}
 
 <span class="album-embed">
   {{- if eq $thumb "true" }}
-  {{- /* For thumb we need the cover photo ID — link to album without cover image */}}
   <a href="{{ $albumURL }}" target="_blank" rel="noopener" class="album-embed-link">
+    <img src="{{ $coverURL }}"
+         alt="{{ $title }}"
+         loading="lazy"
+         class="album-embed-thumb"
+         onerror="this.style.display='none'">
     <span>{{ $title }}</span>
   </a>
   {{- else }}

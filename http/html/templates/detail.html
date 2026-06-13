@@ -61,6 +61,12 @@
         <span class="meta-value text-success">Published</span>
       </div>
       {{end}}
+      {{if .UploaderName}}
+      <div class="meta-row">
+        <span class="meta-label">Uploaded by</span>
+        <span class="meta-value">{{.UploaderName}}</span>
+      </div>
+      {{end}}
     </div>
 
     {{if or .Photo.CameraModel .Photo.LensModel .Photo.FocalLength}}

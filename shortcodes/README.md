@@ -44,7 +44,13 @@ photo show <id>
 {{< album slug="france-2024" >}}
 
 {{< album slug="france-2024" title="France 2024" >}}
+
+{{< album slug="france-2024" title="France 2024" thumb="true" >}}
 ```
+
+The `thumb="true"` option shows the album's cover photo above the link.
+The cover image only displays if the album has a cover photo set and that
+photo is published. Set a cover with `photo album cover <album> <photo-id>`.
 
 Find the album slug with:
 ```bash

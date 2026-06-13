@@ -72,6 +72,37 @@ func (s *UserService) CountUsers(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+func (s *UserService) FindUsers(ctx context.Context) ([]*photo.User, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, username, first_name, last_name, password_hash, is_admin, created_at, updated_at
+		FROM users ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("find users: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*photo.User
+	for rows.Next() {
+		var u photo.User
+		var isAdmin int
+		var createdAt, updatedAt NullTime
+		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.PasswordHash, &isAdmin, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		u.IsAdmin = isAdmin != 0
+		u.CreatedAt = createdAt.Time()
+		u.UpdatedAt = updatedAt.Time()
+		out = append(out, &u)
+	}
+	return out, rows.Err()
+}
+
 func findUserBy(ctx context.Context, tx *Tx, col, val string) (*photo.User, error) {
 	var u photo.User
 	var isAdmin int

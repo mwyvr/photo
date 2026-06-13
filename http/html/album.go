@@ -64,21 +64,22 @@ func (s *Server) filterPublicAlbums(r *http.Request, albums []*photo.Album) []*p
 	return out
 }
 
+// resolveAlbumBySlugOrID looks up an album by slug, falling back to kid ID.
+// Returns ENOTFOUND if neither resolves.
+func (s *Server) resolveAlbumBySlugOrID(r *http.Request, raw string) (*photo.Album, error) {
+	album, err := s.AlbumService.FindAlbumBySlug(r.Context(), raw)
+	if err != nil && photo.ErrorCode(err) == photo.ENOTFOUND {
+		if id, idErr := kid.FromString(raw); idErr == nil {
+			album, err = s.AlbumService.FindAlbumByID(r.Context(), id)
+		}
+	}
+	return album, err
+}
+
 func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 	raw := r.PathValue("id")
 
-	// Try slug first, fall back to kid ID.
-	var album *photo.Album
-	var err error
-	album, err = s.AlbumService.FindAlbumBySlug(r.Context(), raw)
-	if err != nil {
-		if photo.ErrorCode(err) == photo.ENOTFOUND {
-			// Try as kid ID.
-			if id, idErr := kid.FromString(raw); idErr == nil {
-				album, err = s.AlbumService.FindAlbumByID(r.Context(), id)
-			}
-		}
-	}
+	album, err := s.resolveAlbumBySlugOrID(r, raw)
 	if err != nil {
 		if photo.ErrorCode(err) == photo.ENOTFOUND {
 			s.renderNotFound(w, r)
@@ -155,4 +156,40 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 		NextPage: nextPage,
 		PageInfo: pageInfo(offset, pageSize, total),
 	})
+}
+
+// handleAlbumCover serves the album's cover photo thumbnail at a stable,
+// slug-based URL — useful for embedding in static sites (e.g. the Hugo
+// album shortcode) without needing to know the cover photo's ID.
+//
+//	GET /albums/{slug}/cover
+//
+// Returns 404 if the album has no cover photo, or if the cover photo is
+// not published (since this endpoint is public/unauthenticated).
+func (s *Server) handleAlbumCover(w http.ResponseWriter, r *http.Request) {
+	raw := r.PathValue("id")
+	album, err := s.resolveAlbumBySlugOrID(r, raw)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if album.CoverPhotoID == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	p, err := s.PhotoService.FindPhotoByID(r.Context(), *album.CoverPhotoID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !p.Published {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Delegate to the existing public thumb handler by setting the path
+	// value it expects and calling it directly.
+	r.SetPathValue("id", p.ID.String())
+	s.handlePublicThumb(w, r)
 }

@@ -6,6 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{block "title" .}}Photo Library{{end}}</title>
   <link rel="stylesheet" href="/static/style.css">
+  {{if .FeedEnabled}}
+  <link rel="alternate" type="application/rss+xml" title="Photo Library — Recent Photos" href="/feed.xml">
+  {{end}}
 </head>
 <body>
 <div class="site-wrapper">
@@ -20,6 +23,7 @@
         <li><a href="/upload" {{if eq .Page "upload"}}aria-current="page"{{end}}>Upload</a></li>
         {{if .IsAdmin}}
         <li><a href="/admin/status" {{if eq .Page "admin_status"}}aria-current="page"{{end}}>Admin</a></li>
+        <li><a href="/admin/users" {{if eq .Page "admin_users"}}aria-current="page"{{end}}>Users</a></li>
         {{end}}
         <li><a href="/me" {{if eq .Page "me"}}aria-current="page"{{end}}>{{.DisplayName}}</a></li>
         <li><a href="/logout">Sign out</a></li>
@@ -38,7 +42,7 @@
 
   <footer class="site-footer">
     <div class="container">
-      photo library
+      photo library{{if .FeedEnabled}} · <a href="/feed.xml">RSS</a>{{end}}
     </div>
   </footer>
 

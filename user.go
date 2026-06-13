@@ -72,4 +72,8 @@ type UserService interface {
 	// CountUsers returns the total number of registered users.
 	// Used to determine whether this is the first (bootstrap) registration.
 	CountUsers(ctx context.Context) (int, error)
+
+	// FindUsers returns all registered users, ordered by creation date.
+	// Used by the admin user management page.
+	FindUsers(ctx context.Context) ([]*User, error)
 }

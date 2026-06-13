@@ -11,6 +11,8 @@
 //	GET    /api/v1/photos/{id}
 //	PATCH  /api/v1/photos/{id}
 //	DELETE /api/v1/photos/{id}
+//	POST   /api/v1/photos/{id}/regeocode
+//	POST   /api/v1/photos/regeocode-missing
 //
 //	POST   /api/v1/photos/{id}/tags/{name}
 //	DELETE /api/v1/photos/{id}/tags/{name}
@@ -109,6 +111,7 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("PATCH /api/v1/photos/{id}", s.requireAuth(s.handleUpdatePhoto))
 	s.router.HandleFunc("DELETE /api/v1/photos/{id}", s.requireAuth(s.handleDeletePhoto))
 	s.router.HandleFunc("POST /api/v1/photos/{id}/regeocode", s.requireAuth(s.handleRegeocode))
+	s.router.HandleFunc("POST /api/v1/photos/regeocode-missing", s.requireAuth(s.handleRegeocodeMissing))
 
 	s.router.HandleFunc("POST /api/v1/photos/{id}/tags/{name}", s.requireAuth(s.handleAttachTag))
 	s.router.HandleFunc("DELETE /api/v1/photos/{id}/tags/{name}", s.requireAuth(s.handleDetachTag))
@@ -137,16 +140,33 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.server.Handler = securityHeaders(accessLog(s.router, s.TrustedProxy))
 
 	go s.cleanupSessions(ctx)
+
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
+		log.Printf("photod received shutdown signal, stopping...")
 		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		s.server.Shutdown(shutCtx) //nolint:errcheck
+		if err := s.server.Shutdown(shutCtx); err != nil {
+			log.Printf("photod shutdown: %v", err)
+		} else {
+			log.Printf("photod stopped cleanly")
+		}
 	}()
+
 	log.Printf("photod listening on %s", s.server.Addr)
-	if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	err := s.server.ListenAndServe()
+
+	if err != nil && err != http.ErrServerClosed {
+		// Startup/runtime error unrelated to a shutdown signal — don't wait
+		// for shutdownDone, since ctx may never be cancelled.
 		return err
 	}
+
+	// err == http.ErrServerClosed means Shutdown was called (ctx was
+	// cancelled); wait for the shutdown goroutine to finish logging.
+	<-shutdownDone
 	return nil
 }
 

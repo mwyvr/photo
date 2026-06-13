@@ -326,6 +326,17 @@ func (s *UserService) CountUsers(ctx context.Context) (int, error) {
 	return len(s.users), nil
 }
 
+func (s *UserService) FindUsers(ctx context.Context) ([]*photo.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*photo.User, 0, len(s.users))
+	for _, u := range s.users {
+		cp := *u
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
 // --- SessionService ---------------------------------------------------------
 
 type SessionService struct {

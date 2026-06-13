@@ -186,18 +186,30 @@ func (s *Server) handlePhotoDetail(w http.ResponseWriter, r *http.Request) {
 
 	prevURL, nextURL, backURL := s.resolveNavigation(r, id, userID, authed)
 
+	// Resolve the uploader's display name for authenticated viewers.
+	// Shown regardless of whether it's the viewer's own photo, as a simple
+	// confirmation of ownership in a shared library.
+	var uploaderName string
+	if authed {
+		if u, err := s.UserService.FindUserByID(r.Context(), p.UserID); err == nil {
+			uploaderName = u.DisplayName()
+		}
+	}
+
 	s.render(w, r, "detail.html", struct {
 		baseData
-		Photo   *photo.Photo
-		PrevURL string
-		NextURL string
-		BackURL string
+		Photo        *photo.Photo
+		PrevURL      string
+		NextURL      string
+		BackURL      string
+		UploaderName string
 	}{
-		baseData: s.newBase(r, "detail"),
-		Photo:    p,
-		PrevURL:  prevURL,
-		NextURL:  nextURL,
-		BackURL:  backURL,
+		baseData:     s.newBase(r, "detail"),
+		Photo:        p,
+		PrevURL:      prevURL,
+		NextURL:      nextURL,
+		BackURL:      backURL,
+		UploaderName: uploaderName,
 	})
 }
 
@@ -460,6 +472,39 @@ func (s *Server) handleAdminStatus(w http.ResponseWriter, r *http.Request) {
 	}{
 		baseData: s.newBase(r, "admin_status"),
 		Status:   st,
+	})
+}
+
+// handleAdminUsers renders a list of all registered users. Admin only.
+func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := s.UserService.FindUsers(r.Context())
+	if err != nil {
+		s.renderServerError(w, r, err)
+		return
+	}
+
+	// For each user, get their personal photo count for a quick overview.
+	type userRow struct {
+		*photo.User
+		PhotoCount int
+	}
+	rows := make([]userRow, 0, len(users))
+	for _, u := range users {
+		uid := u.ID
+		st, err := s.StatusService.LibraryStatus(r.Context(), &uid)
+		count := 0
+		if err == nil {
+			count = st.TotalPhotos
+		}
+		rows = append(rows, userRow{User: u, PhotoCount: count})
+	}
+
+	s.render(w, r, "admin_users.html", struct {
+		baseData
+		Users []userRow
+	}{
+		baseData: s.newBase(r, "admin_users"),
+		Users:    rows,
 	})
 }
 
