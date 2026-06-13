@@ -259,6 +259,7 @@ func (s *Server) handleUpdatePhoto(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Description  *string `json:"description"`
 		LocationName *string `json:"locationName"`
+		Published    *bool   `json:"published"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondError(w, photo.Errorf(photo.EINVALID, "invalid request body"))
@@ -268,6 +269,7 @@ func (s *Server) handleUpdatePhoto(w http.ResponseWriter, r *http.Request) {
 	updated, err := s.PhotoService.UpdatePhoto(r.Context(), id, photo.PhotoUpdate{
 		Description:  body.Description,
 		LocationName: body.LocationName,
+		Published:    body.Published,
 	})
 	if err != nil {
 		respondError(w, err)
@@ -335,6 +337,61 @@ func (s *Server) handleRegeocode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusOK, updated)
+}
+
+// handleRegeocodeMissing finds all of the requesting user's photos that have
+// GPS coordinates but no location name, and reverse-geocodes each in turn.
+//
+//	POST /api/v1/photos/regeocode-missing
+//
+// The NominatimGeocoder self-rate-limits to one request per second, so this
+// may take a while for large libraries. Returns a summary of how many photos
+// were updated and any that failed.
+func (s *Server) handleRegeocodeMissing(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromContext(r.Context())
+
+	t := true
+	photos, _, err := s.PhotoService.FindPhotos(r.Context(), photo.PhotoFilter{
+		UserID:          userID,
+		MissingLocation: &t,
+		Limit:           10000, // effectively unbounded for a personal library
+	})
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+
+	type failure struct {
+		PhotoID string `json:"photoId"`
+		Error   string `json:"error"`
+	}
+	var updated int
+	var failures []failure
+
+	for _, p := range photos {
+		if !p.HasGPS() {
+			continue // shouldn't happen given the filter, but guard anyway
+		}
+		loc, err := s.Geocoder.ReverseGeocode(r.Context(), *p.GPSLat, *p.GPSLon)
+		if err != nil {
+			failures = append(failures, failure{PhotoID: p.ID.String(), Error: err.Error()})
+			continue
+		}
+		name := loc.DisplayName()
+		if _, err := s.PhotoService.UpdatePhoto(r.Context(), p.ID, photo.PhotoUpdate{
+			LocationName: &name,
+		}); err != nil {
+			failures = append(failures, failure{PhotoID: p.ID.String(), Error: err.Error()})
+			continue
+		}
+		updated++
+	}
+
+	respond(w, http.StatusOK, map[string]interface{}{
+		"total":    len(photos),
+		"updated":  updated,
+		"failures": failures,
+	})
 }
 
 func (s *Server) handleDeletePhoto(w http.ResponseWriter, r *http.Request) {

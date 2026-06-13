@@ -284,3 +284,62 @@ func TestPhotoService_FindPhotos_IncludeOthersPublished(t *testing.T) {
 		t.Error("did not expect bob's private photo to be included")
 	}
 }
+
+// makePhotoWithGPS creates a photo with GPS coordinates set.
+func makePhotoWithGPS(t *testing.T, svc *sqlite.PhotoService, userID kid.ID, filename, sha256 string, lat, lon float64) *photo.Photo {
+	t.Helper()
+	p := &photo.Photo{
+		UserID:        userID,
+		Filename:      filename,
+		StoredPath:    "2024/01/" + filename,
+		SHA256:        sha256,
+		MIMEType:      "image/jpeg",
+		FileType:      "JPEG",
+		FileSizeBytes: 1024,
+		GPSLat:        &lat,
+		GPSLon:        &lon,
+	}
+	if err := svc.CreatePhoto(context.Background(), p); err != nil {
+		t.Fatalf("create photo %q: %v", filename, err)
+	}
+	return p
+}
+
+func TestPhotoService_FindPhotos_MissingLocation(t *testing.T) {
+	db := newTestDB(t)
+	userSvc := sqlite.NewUserService(db)
+	photoSvc := sqlite.NewPhotoService(db)
+	ctx := context.Background()
+
+	alice := makeUser(t, userSvc, "alice", "alice@example.com")
+
+	lat, lon := 49.05, -120.78
+
+	// Photo with GPS but no location name — should match.
+	withGPSNoLoc := makePhotoWithGPS(t, photoSvc, alice.ID, "gps-no-location.jpg", "hash-1", lat, lon)
+
+	// Photo with GPS and location name — should not match.
+	withGPSAndLoc := makePhotoWithGPS(t, photoSvc, alice.ID, "gps-with-location.jpg", "hash-2", lat, lon)
+	loc := "Penticton, Canada"
+	if _, err := photoSvc.UpdatePhoto(ctx, withGPSAndLoc.ID, photo.PhotoUpdate{LocationName: &loc}); err != nil {
+		t.Fatalf("set location: %v", err)
+	}
+
+	// Photo with no GPS at all — should not match.
+	makePhoto(t, photoSvc, alice.ID, "no-gps.jpg", "hash-3")
+
+	missing := true
+	photos, total, err := photoSvc.FindPhotos(ctx, photo.PhotoFilter{
+		UserID:          alice.ID,
+		MissingLocation: &missing,
+	})
+	if err != nil {
+		t.Fatalf("find photos (missing location): %v", err)
+	}
+	if total != 1 {
+		t.Errorf("total = %d, want 1", total)
+	}
+	if len(photos) != 1 || photos[0].ID != withGPSNoLoc.ID {
+		t.Error("expected only the GPS-without-location photo")
+	}
+}

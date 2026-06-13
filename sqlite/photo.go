@@ -160,6 +160,9 @@ func findPhotos(ctx context.Context, tx *Tx, filter photo.PhotoFilter) ([]*photo
 		where = append(where, "published = ?")
 		args = append(args, boolToInt(*v))
 	}
+	if v := filter.MissingLocation; v != nil && *v {
+		where = append(where, "gps_lat IS NOT NULL AND (location_name IS NULL OR location_name = '')")
+	}
 	if v := filter.SHA256; v != nil {
 		where = append(where, "sha256 = ?")
 		args = append(args, *v)

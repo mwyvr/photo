@@ -105,6 +105,7 @@ type photoJSON struct {
 	CapturedAt    *time.Time `json:"capturedAt"`
 	LocationName  string     `json:"locationName"`
 	IsRaw         bool       `json:"isRaw"`
+	Published     bool       `json:"published"`
 	Tags          []tagJSON  `json:"tags"`
 	Description   string     `json:"description"`
 	EXIFRaw       string     `json:"exifRaw,omitempty"`
@@ -318,8 +319,17 @@ func (c *client) getPhoto(ctx context.Context, id string) (*photoJSON, error) {
 	return &p, nil
 }
 
-func (c *client) updatePhoto(ctx context.Context, id, description string) (*photoJSON, error) {
-	body := map[string]string{"description": description}
+func (c *client) updatePhoto(ctx context.Context, id, description, location string, published *bool) (*photoJSON, error) {
+	body := map[string]interface{}{}
+	if description != "" {
+		body["description"] = description
+	}
+	if location != "" {
+		body["locationName"] = location
+	}
+	if published != nil {
+		body["published"] = *published
+	}
 	var p photoJSON
 	if err := c.do(ctx, http.MethodPatch, "/api/v1/photos/"+id, body, &p); err != nil {
 		return nil, err
@@ -337,6 +347,23 @@ func (c *client) regeocode(ctx context.Context, id, location string) (*photoJSON
 		return nil, err
 	}
 	return &p, nil
+}
+
+type regeocodeMissingResult struct {
+	Total    int `json:"total"`
+	Updated  int `json:"updated"`
+	Failures []struct {
+		PhotoID string `json:"photoId"`
+		Error   string `json:"error"`
+	} `json:"failures"`
+}
+
+func (c *client) regeocodeMissing(ctx context.Context) (*regeocodeMissingResult, error) {
+	var result regeocodeMissingResult
+	if err := c.do(ctx, http.MethodPost, "/api/v1/photos/regeocode-missing", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 
