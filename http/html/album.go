@@ -20,7 +20,7 @@ func (s *Server) handleAlbumList(w http.ResponseWriter, r *http.Request) {
 
 	albums, _, err := s.AlbumService.FindAlbums(r.Context(), filter)
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		s.renderServerError(w, r, err)
 		return
 	}
 
@@ -81,9 +81,9 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if photo.ErrorCode(err) == photo.ENOTFOUND {
-			http.NotFound(w, r)
+			s.renderNotFound(w, r)
 		} else {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			s.renderServerError(w, r, err)
 		}
 		return
 	}
@@ -93,7 +93,7 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 
 	photos, total, err := s.AlbumService.FindAlbumPhotos(r.Context(), album.ID, offset, pageSize)
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		s.renderServerError(w, r, err)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 		total = len(pub)
 		// If no published photos at all, return 404.
 		if total == 0 {
-			http.NotFound(w, r)
+			s.renderNotFound(w, r)
 			return
 		}
 	}

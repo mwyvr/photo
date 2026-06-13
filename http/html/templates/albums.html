@@ -12,9 +12,11 @@
   <a href="/albums/{{.Slug}}" class="album-card">
     {{if .CoverPhotoID}}
     <img class="album-card-thumb"
-         src="/p/{{.CoverPhotoID}}/thumb"
+         src="{{if $.Authenticated}}/photo/{{.CoverPhotoID}}/thumb{{else}}/p/{{.CoverPhotoID}}/thumb{{end}}"
          alt="{{.Name}}"
-         loading="lazy">
+         loading="lazy"
+         onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">
+    <div class="album-card-thumb-placeholder" style="display:none">No cover</div>
     {{else}}
     <div class="album-card-thumb-placeholder">No cover</div>
     {{end}}

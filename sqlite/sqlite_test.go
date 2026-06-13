@@ -1,6 +1,7 @@
 package sqlite_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -70,5 +71,32 @@ func TestDB_MigrationsIdempotent(t *testing.T) {
 	tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&count) //nolint
 	if count == 0 {
 		t.Error("no migrations applied")
+	}
+}
+
+func TestDB_Backup(t *testing.T) {
+	// Backup requires a file-based DB; :memory: databases can't be VACUUM INTO'd
+	// to a separate file in the same way, but the VACUUM INTO command itself
+	// works against any open connection.
+	dir := t.TempDir()
+	dbPath := dir + "/library.db"
+
+	db := sqlite.NewDB(dbPath)
+	if err := db.Open(); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+
+	var buf bytes.Buffer
+	if err := db.Backup(context.Background(), &buf); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Error("expected non-empty backup")
+	}
+	// SQLite files start with the magic header "SQLite format 3\000".
+	if !bytes.HasPrefix(buf.Bytes(), []byte("SQLite format 3\x00")) {
+		t.Error("backup does not start with SQLite file header")
 	}
 }

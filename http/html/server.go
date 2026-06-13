@@ -46,6 +46,7 @@ type Server struct {
 	SessionService photo.SessionService
 	UserService    photo.UserService
 	StatusService  photo.StatusService
+	BackupService  photo.BackupService
 
 	// JWTSecret must match the API server's secret.
 	JWTSecret []byte
@@ -164,6 +165,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /albums", s.handleAlbumList)
 	mux.HandleFunc("GET /albums/{id}", s.handleAlbumDetail)
 	mux.HandleFunc("GET /status", s.requireAuth(s.handleStatus))
+	mux.HandleFunc("GET /backup", s.requireAuth(s.handleBackup))
 }
 
 // --- base template data ----------------------------------------------------
@@ -202,6 +204,28 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
 		log.Printf("html: render %s: %v", name, err)
 	}
+}
+
+// renderNotFound renders a styled 404 page with the correct status code.
+func (s *Server) renderNotFound(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotFound)
+	s.render(w, r, "404.html", struct {
+		baseData
+	}{
+		baseData: s.newBase(r, ""),
+	})
+}
+
+// renderServerError renders a styled 500 page with the correct status code.
+// The original error is logged but not shown to the client.
+func (s *Server) renderServerError(w http.ResponseWriter, r *http.Request, err error) {
+	log.Printf("html: server error: %v", err)
+	w.WriteHeader(http.StatusInternalServerError)
+	s.render(w, r, "500.html", struct {
+		baseData
+	}{
+		baseData: s.newBase(r, ""),
+	})
 }
 
 // --- cookie auth -----------------------------------------------------------

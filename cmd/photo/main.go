@@ -6,7 +6,7 @@
 //
 // Commands:
 //
-//	register   Create a new account
+//	register   Create a new account (invite token required after first user)
 //	login      Authenticate and store a session token
 //	logout     Invalidate the current session token
 //	add        Import a file or directory into the library
@@ -18,6 +18,8 @@
 //	tag        Attach a tag to a photo
 //	untag      Remove a tag from a photo
 //	show       Display details for a single photo
+//	admin      Manage invites (admin only)
+//	backup     Download a database backup (admin only)
 //	config     View or update client configuration
 package main
 
@@ -91,6 +93,10 @@ func run(ctx context.Context, args []string) error {
 		cmdErr = runUntag(ctx, client, rest)
 	case "show":
 		cmdErr = runShow(ctx, client, rest)
+	case "admin":
+		cmdErr = runAdmin(ctx, client, rest)
+	case "backup":
+		cmdErr = runBackup(ctx, client, rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %q\n\n", cmd)
 		printUsage()
@@ -130,6 +136,8 @@ Commands:
   tag        Attach a tag to a photo
   untag      Remove a tag from a photo
   show       Display full details for a photo
+  admin      Manage invites (admin only)
+  backup     Download a database backup (admin only)
   config     View or update client configuration
 
 Run 'photo <command> -help' for command-specific usage.

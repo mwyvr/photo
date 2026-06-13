@@ -68,6 +68,8 @@ func run(ctx context.Context) error {
 	photoSvc := sqlite.NewPhotoService(db)
 	tagSvc := sqlite.NewTagService(db)
 	statusSvc := sqlite.NewStatusService(db)
+	backupSvc := sqlite.NewBackupService(db)
+	inviteSvc := sqlite.NewInviteService(db)
 	albumSvc := sqlite.NewAlbumService(db)
 
 	// Populate slugs for any albums created before migration 0006.
@@ -96,6 +98,8 @@ func run(ctx context.Context) error {
 	srv.PhotoService = photoSvc
 	srv.TagService = tagSvc
 	srv.StatusService = statusSvc
+	srv.BackupService = backupSvc
+	srv.InviteService = inviteSvc
 	srv.AlbumService = albumSvc
 	srv.Importer = imp
 	srv.Geocoder = geocoder
@@ -110,10 +114,14 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("html ui: %w", err)
 	}
 	ui.PhotoService = photoSvc
+	ui.Importer = imp
+	ui.PublishDefault = cfg.PublishDefault
 	ui.AlbumService = albumSvc
 	ui.SessionService = sessionSvc
 	ui.UserService = userSvc
 	ui.StatusService = statusSvc
+	ui.BackupService = backupSvc
+	ui.InviteService = inviteSvc
 	ui.JWTSecret = cfg.JWTSecret
 	ui.LibraryRoot = cfg.LibraryRoot
 	ui.TrustedProxy = cfg.TrustedProxy

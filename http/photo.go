@@ -173,15 +173,20 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusCreated, result.Photo)
 }
 
-// safeFilePath joins libraryRoot and rel, returning an error if the result
+// SafeFilePath joins libraryRoot and rel, returning an error if the result
 // would escape libraryRoot. Prevents path traversal via crafted StoredPath values.
-func safeFilePath(libraryRoot, rel string) (string, error) {
+func SafeFilePath(libraryRoot, rel string) (string, error) {
 	full := filepath.Join(libraryRoot, rel)
 	prefix := libraryRoot + string(filepath.Separator)
 	if !strings.HasPrefix(full, prefix) {
 		return "", fmt.Errorf("path traversal attempt: %q", rel)
 	}
 	return full, nil
+}
+
+// safeFilePath is the internal alias used by handlers.
+func safeFilePath(libraryRoot, rel string) (string, error) {
+	return SafeFilePath(libraryRoot, rel)
 }
 
 // handleServePhotoFile serves the raw image file for an authenticated user.

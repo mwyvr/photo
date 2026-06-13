@@ -4,8 +4,10 @@
 <div class="album-header">
   {{if .Album.CoverPhotoID}}
   <img class="album-cover"
-       src="/p/{{.Album.CoverPhotoID}}/thumb"
-       alt="{{.Album.Name}}">
+       src="{{if .Authenticated}}/photo/{{.Album.CoverPhotoID}}/thumb{{else}}/p/{{.Album.CoverPhotoID}}/thumb{{end}}"
+       alt="{{.Album.Name}}"
+       onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">
+  <div class="album-cover-placeholder" style="display:none">No cover</div>
   {{else}}
   <div class="album-cover-placeholder">No cover</div>
   {{end}}
@@ -20,7 +22,7 @@
     </p>
     {{if .Authenticated}}
     <div class="mt-md">
-      <code class="text-muted">{{`{{`}}< album id="{{.Album.ID}}" >{{`}}`}}</code>
+      <code class="text-muted">{{`{{`}}< album slug="{{.Album.Slug}}" >{{`}}`}}</code>
     </div>
     {{end}}
   </div>

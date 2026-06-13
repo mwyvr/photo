@@ -115,3 +115,107 @@ func TestAlbumService_Delete(t *testing.T) {
 		t.Errorf("expected ENOTFOUND after delete, got %q", photo.ErrorCode(err))
 	}
 }
+
+func TestAlbumService_SlugDerived(t *testing.T) {
+	db := newTestDB(t)
+	userSvc := sqlite.NewUserService(db)
+	albumSvc := sqlite.NewAlbumService(db)
+	ctx := context.Background()
+
+	u := makeUser(t, userSvc, "alice", "alice@example.com")
+
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"France 2024", "france-2024"},
+		{"Hiking/Camping", "hiking-camping"},
+		{"Black & White", "black-white"},
+		{"Travel", "travel"},
+	}
+
+	for _, tt := range tests {
+		a := &photo.Album{UserID: u.ID, Name: tt.name}
+		if err := albumSvc.CreateAlbum(ctx, a); err != nil {
+			t.Fatalf("create %q: %v", tt.name, err)
+		}
+		if a.Slug != tt.want {
+			t.Errorf("name=%q slug=%q, want %q", tt.name, a.Slug, tt.want)
+		}
+	}
+}
+
+func TestAlbumService_SlugUnique(t *testing.T) {
+	db := newTestDB(t)
+	userSvc := sqlite.NewUserService(db)
+	albumSvc := sqlite.NewAlbumService(db)
+	ctx := context.Background()
+
+	u := makeUser(t, userSvc, "alice", "alice@example.com")
+
+	a1 := &photo.Album{UserID: u.ID, Name: "Travel"}
+	albumSvc.CreateAlbum(ctx, a1) //nolint
+
+	a2 := &photo.Album{UserID: u.ID, Name: "Travel"}
+	if err := albumSvc.CreateAlbum(ctx, a2); err != nil {
+		t.Fatalf("create duplicate name: %v", err)
+	}
+	if a2.Slug == a1.Slug {
+		t.Errorf("expected unique slug, both got %q", a1.Slug)
+	}
+	if a2.Slug != "travel-2" {
+		t.Errorf("slug = %q, want travel-2", a2.Slug)
+	}
+}
+
+func TestAlbumService_FindBySlug(t *testing.T) {
+	db := newTestDB(t)
+	userSvc := sqlite.NewUserService(db)
+	albumSvc := sqlite.NewAlbumService(db)
+	ctx := context.Background()
+
+	u := makeUser(t, userSvc, "alice", "alice@example.com")
+	a := &photo.Album{UserID: u.ID, Name: "France 2024"}
+	albumSvc.CreateAlbum(ctx, a) //nolint
+
+	found, err := albumSvc.FindAlbumBySlug(ctx, "france-2024")
+	if err != nil {
+		t.Fatalf("find by slug: %v", err)
+	}
+	if found.ID != a.ID {
+		t.Error("found wrong album by slug")
+	}
+
+	_, err = albumSvc.FindAlbumBySlug(ctx, "nonexistent")
+	if photo.ErrorCode(err) != photo.ENOTFOUND {
+		t.Errorf("expected ENOTFOUND, got %q", photo.ErrorCode(err))
+	}
+}
+
+func TestAlbumService_MigrateExistingSlugs(t *testing.T) {
+	db := newTestDB(t)
+	userSvc := sqlite.NewUserService(db)
+	albumSvc := sqlite.NewAlbumService(db)
+	ctx := context.Background()
+
+	u := makeUser(t, userSvc, "alice", "alice@example.com")
+
+	// Create album then manually clear its slug to simulate pre-migration state.
+	a := &photo.Album{UserID: u.ID, Name: "My Album"}
+	albumSvc.CreateAlbum(ctx, a) //nolint
+
+	tx, _ := db.BeginTx(ctx, nil)
+	tx.ExecContext(ctx, `UPDATE albums SET slug = '' WHERE id = ?`, a.ID) //nolint
+	tx.Commit()                                                            //nolint
+
+	// Run migration.
+	if err := albumSvc.MigrateExistingSlugs(ctx); err != nil {
+		t.Fatalf("migrate slugs: %v", err)
+	}
+
+	// Slug should now be set.
+	found, _ := albumSvc.FindAlbumByID(ctx, a.ID)
+	if found.Slug != "my-album" {
+		t.Errorf("slug after migration = %q, want my-album", found.Slug)
+	}
+}

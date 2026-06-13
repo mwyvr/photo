@@ -10,7 +10,9 @@ import (
 	"database/sql/driver"
 	"embed"
 	"fmt"
+	"io"
 	"io/fs"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -69,6 +71,36 @@ func (db *DB) Open() (err error) {
 		return fmt.Errorf("sqlite: set synchronous: %w", err)
 	}
 	return db.migrate()
+}
+
+// Backup writes a consistent snapshot of the database to w.
+// Uses SQLite's VACUUM INTO to produce a clean copy without WAL artifacts.
+// Safe to call while the database is in use.
+func (db *DB) Backup(ctx context.Context, w io.Writer) error {
+	// VACUUM INTO writes a clean, fully checkpointed copy to a temp file.
+	// We then stream that file to w and remove it.
+	tmp, err := os.CreateTemp("", "photod-backup-*.db")
+	if err != nil {
+		return fmt.Errorf("backup: create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	if _, err := db.db.ExecContext(ctx, `VACUUM INTO ?`, tmpPath); err != nil {
+		return fmt.Errorf("backup: vacuum into: %w", err)
+	}
+
+	f, err := os.Open(tmpPath)
+	if err != nil {
+		return fmt.Errorf("backup: open temp: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(w, f); err != nil {
+		return fmt.Errorf("backup: stream: %w", err)
+	}
+	return nil
 }
 
 // Close closes the database connection.

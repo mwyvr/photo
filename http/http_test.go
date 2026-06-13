@@ -3,8 +3,10 @@ package http_test
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/mwyvr/kid"
@@ -25,9 +27,10 @@ func testServer(t *testing.T) (*photohttp.Server, *httptest.Server) {
 	srv.TagService = mock.NewTagService()
 	srv.StatusService = &mock.StatusService{}
 	srv.AlbumService = mock.NewAlbumService()
+	srv.BackupService = &mock.BackupService{}
 	srv.LibraryRoot = t.TempDir()
 
-	ts := httptest.NewServer(srv.Router())
+	ts := httptest.NewServer(photohttp.WrapForTest(srv.Router()))
 	t.Cleanup(ts.Close)
 	return srv, ts
 }
@@ -226,7 +229,144 @@ func TestAttachDetachTag(t *testing.T) {
 	}
 }
 
-// --- Status test ------------------------------------------------------------
+// --- Security header tests --------------------------------------------------
+
+func TestSecurityHeaders(t *testing.T) {
+	_, ts := testServer(t)
+
+	resp, err := ts.Client().Get(ts.URL + "/api/v1/photos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	headers := map[string]string{
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+		"Referrer-Policy":        "same-origin",
+	}
+	for h, want := range headers {
+		if got := resp.Header.Get(h); got != want {
+			t.Errorf("header %s = %q, want %q", h, got, want)
+		}
+	}
+	csp := resp.Header.Get("Content-Security-Policy")
+	if csp == "" {
+		t.Error("expected Content-Security-Policy header to be set")
+	}
+	if resp.Header.Get("Server") == "" {
+		t.Error("expected Server header to be set")
+	}
+}
+
+// --- Rate limiting tests ----------------------------------------------------
+
+func TestRateLimit_BlocksAfterFailures(t *testing.T) {
+	_, ts := testServer(t)
+
+	// Register a user so login attempts hit the bcrypt path.
+	registerAndLogin(t, ts, "alice", "correctpassword")
+
+	loginWithWrongPassword := func() int {
+		body, _ := json.Marshal(map[string]string{
+			"username": "alice", "password": "wrong",
+		})
+		resp, _ := ts.Client().Post(ts.URL+"/api/v1/login",
+			"application/json", bytes.NewReader(body))
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// First 5 failures should return 401.
+	for i := 0; i < 5; i++ {
+		if status := loginWithWrongPassword(); status != http.StatusUnauthorized {
+			t.Errorf("attempt %d: status = %d, want 401", i+1, status)
+		}
+	}
+
+	// 6th attempt should be rate limited — 429.
+	if status := loginWithWrongPassword(); status != http.StatusTooManyRequests {
+		t.Errorf("6th attempt: status = %d, want 429 (rate limited)", status)
+	}
+}
+
+// --- Login timing test ------------------------------------------------------
+
+func TestLogin_UnknownUsername_Returns401(t *testing.T) {
+	_, ts := testServer(t)
+
+	// An unknown username should return 401, not 404,
+	// to prevent username enumeration.
+	body, _ := json.Marshal(map[string]string{
+		"username": "doesnotexist", "password": "somepassword",
+	})
+	resp, _ := ts.Client().Post(ts.URL+"/api/v1/login",
+		"application/json", bytes.NewReader(body))
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 (not 404, to prevent enumeration)", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result) //nolint
+	// Error message should not distinguish between bad username and bad password.
+	msg, _ := result["error"].(string)
+	if msg == "" {
+		t.Error("expected error message in response")
+	}
+}
+
+// --- Album slug tests -------------------------------------------------------
+
+func TestAlbumCreate_HasSlug(t *testing.T) {
+	_, ts := testServer(t)
+	token := registerAndLogin(t, ts, "alice", "password123")
+
+	body, _ := json.Marshal(map[string]string{"name": "France 2024"})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/albums",
+		bytes.NewReader(body))
+	req.Header.Set("Authorization", authHeader(token))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := ts.Client().Do(req)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var album map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&album) //nolint
+	slug, _ := album["slug"].(string)
+	if slug != "france-2024" {
+		t.Errorf("slug = %q, want %q", slug, "france-2024")
+	}
+}
+
+func TestAlbumFetch_BySlug(t *testing.T) {
+	_, ts := testServer(t)
+	token := registerAndLogin(t, ts, "alice", "password123")
+
+	// Create album.
+	body, _ := json.Marshal(map[string]string{"name": "Travel"})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/albums",
+		bytes.NewReader(body))
+	req.Header.Set("Authorization", authHeader(token))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := ts.Client().Do(req)
+	resp.Body.Close()
+
+	// Fetch by slug.
+	req2, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/albums/travel", nil)
+	req2.Header.Set("Authorization", authHeader(token))
+	resp2, _ := ts.Client().Do(req2)
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("fetch by slug: status = %d, want 200", resp2.StatusCode)
+	}
+}
+
 
 func TestStatus_Authenticated(t *testing.T) {
 	_, ts := testServer(t)
@@ -246,6 +386,48 @@ func TestStatus_Unauthenticated(t *testing.T) {
 	_, ts := testServer(t)
 
 	resp, _ := ts.Client().Get(ts.URL + "/api/v1/status")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+// --- Backup tests ------------------------------------------------------------
+
+func TestBackup_Authenticated(t *testing.T) {
+	_, ts := testServer(t)
+	token := registerAndLogin(t, ts, "alice", "password123")
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/backup", nil)
+	req.Header.Set("Authorization", authHeader(token))
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want application/octet-stream", ct)
+	}
+	cd := resp.Header.Get("Content-Disposition")
+	if !strings.Contains(cd, "attachment") || !strings.Contains(cd, ".db") {
+		t.Errorf("Content-Disposition = %q, want attachment with .db filename", cd)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if len(body) == 0 {
+		t.Error("expected non-empty backup body")
+	}
+}
+
+func TestBackup_Unauthenticated(t *testing.T) {
+	_, ts := testServer(t)
+
+	resp, _ := ts.Client().Get(ts.URL + "/api/v1/backup")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnauthorized {

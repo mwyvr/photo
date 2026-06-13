@@ -8,12 +8,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/mwyvr/photo"
 	"github.com/mwyvr/kid"
+	"github.com/mwyvr/photo"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -155,17 +156,33 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// requireAdmin wraps requireAuth and additionally checks the user is an admin.
+// Responds 403 if the authenticated user is not an admin.
+func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return s.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromContext(r.Context())
+		u, err := s.UserService.FindUserByID(r.Context(), userID)
+		if err != nil || !u.IsAdmin {
+			respondError(w, photo.Errorf(photo.EFORBIDDEN, "admin access required"))
+			return
+		}
+		next(w, r)
+	})
+}
+
 // --- auth handlers ----------------------------------------------------------
 
 type registerRequest struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Username    string `json:"username"` // email address
+	FirstName   string `json:"firstName"`
+	LastName    string `json:"lastName"`
+	Password    string `json:"password"`
+	InviteToken string `json:"inviteToken"`
 }
 
 type authResponse struct {
-	Token  string      `json:"token"`
-	User   *photo.User `json:"user"`
+	Token string      `json:"token"`
+	User  *photo.User `json:"user"`
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -174,13 +191,40 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		respondError(w, photo.Errorf(photo.EINVALID, "invalid request body"))
 		return
 	}
-	if req.Username == "" || req.Email == "" || req.Password == "" {
-		respondError(w, photo.Errorf(photo.EINVALID, "username, email, and password are required"))
+	if req.Username == "" || req.Password == "" {
+		respondError(w, photo.Errorf(photo.EINVALID, "username (email) and password are required"))
 		return
 	}
 	if len(req.Password) < 8 {
 		respondError(w, photo.Errorf(photo.EINVALID, "password must be at least 8 characters"))
 		return
+	}
+
+	// Bootstrap case: the very first user does not need an invite and
+	// becomes an admin automatically. All subsequent registrations require
+	// a valid, unused invite token.
+	count, err := s.UserService.CountUsers(r.Context())
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	isFirstUser := count == 0
+
+	var inv *photo.Invite
+	if !isFirstUser {
+		if req.InviteToken == "" {
+			respondError(w, photo.Errorf(photo.EFORBIDDEN, "an invite token is required to register"))
+			return
+		}
+		inv, err = s.InviteService.FindInviteByToken(r.Context(), req.InviteToken)
+		if err != nil {
+			respondError(w, photo.Errorf(photo.EFORBIDDEN, "invalid invite token"))
+			return
+		}
+		if !inv.IsValid() {
+			respondError(w, photo.Errorf(photo.EFORBIDDEN, "invite token has expired or already been used"))
+			return
+		}
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -191,12 +235,23 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	u := &photo.User{
 		Username:     req.Username,
-		Email:        req.Email,
+		FirstName:    req.FirstName,
+		LastName:     req.LastName,
 		PasswordHash: string(hash),
+		IsAdmin:      isFirstUser,
 	}
 	if err := s.UserService.CreateUser(r.Context(), u); err != nil {
 		respondError(w, err)
 		return
+	}
+
+	if inv != nil {
+		if err := s.InviteService.MarkInviteUsed(r.Context(), inv.Token, u.ID); err != nil {
+			// User was created but invite couldn't be marked used — log and continue.
+			// This is not fatal: the invite remains usable, which is the safer failure mode
+			// (a stuck invite is better than a stuck registration).
+			log.Printf("register: mark invite used: %v", err)
+		}
 	}
 
 	token, sess, err := s.createSession(r.Context(), u.ID)

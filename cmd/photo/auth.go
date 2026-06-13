@@ -14,26 +14,40 @@ import (
 func runRegister(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("register", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `Usage: photo register
+		fmt.Fprint(os.Stderr, `Usage: photo register [invite-token]
 
 Create a new account on the photod server.
-You will be prompted for username, email, and password.
+You will be prompted for your email, name, and password.
+
+An invite token is required unless this is the first account on the server
+(the first account becomes an administrator automatically). An admin can
+generate invite tokens with 'photo admin invite-create'.
+
 A session token is stored in the config file on success.
 
 `)
 	}
 	fs.Parse(args) //nolint:errcheck
 
+	var inviteToken string
+	if fs.NArg() > 0 {
+		inviteToken = fs.Arg(0)
+	}
+
 	cfg := loadOrEmptyConfig()
 	if cfg.ServerURL == "" {
 		return fmt.Errorf("server URL not set; run 'photo config set server <url>' first")
 	}
 
-	username, err := prompt("Username: ")
+	username, err := prompt("Email: ")
 	if err != nil {
 		return err
 	}
-	email, err := prompt("Email: ")
+	firstName, err := prompt("First name (optional): ")
+	if err != nil {
+		return err
+	}
+	lastName, err := prompt("Last name (optional): ")
 	if err != nil {
 		return err
 	}
@@ -50,7 +64,7 @@ A session token is stored in the config file on success.
 	}
 
 	client := newClient(cfg.ServerURL, "")
-	resp, err := client.register(ctx, username, email, password)
+	resp, err := client.register(ctx, username, firstName, lastName, password, inviteToken)
 	if err != nil {
 		return fmt.Errorf("register: %w", err)
 	}
@@ -61,7 +75,11 @@ A session token is stored in the config file on success.
 		return fmt.Errorf("save config: %w", err)
 	}
 
-	fmt.Printf("Registered and logged in as %s.\n", resp.User.Username)
+	if resp.User.IsAdmin {
+		fmt.Printf("Registered and logged in as %s (administrator).\n", resp.User.Username)
+	} else {
+		fmt.Printf("Registered and logged in as %s.\n", resp.User.Username)
+	}
 	return nil
 }
 

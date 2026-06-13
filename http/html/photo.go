@@ -1,7 +1,9 @@
 package html
 
 import (
+	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -15,7 +17,7 @@ const pageSize = 48
 
 func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
-		http.NotFound(w, r)
+		s.renderNotFound(w, r)
 		return
 	}
 
@@ -54,7 +56,7 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 
 	photos, total, err := s.PhotoService.FindPhotos(r.Context(), filter)
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		s.renderServerError(w, r, err)
 		return
 	}
 
@@ -130,23 +132,23 @@ func (s *Server) handlePhotoDetail(w http.ResponseWriter, r *http.Request) {
 	raw := r.PathValue("id")
 	id, err := kid.FromString(raw)
 	if err != nil {
-		http.NotFound(w, r)
+		s.renderNotFound(w, r)
 		return
 	}
 
 	p, err := s.PhotoService.FindPhotoByID(r.Context(), id)
 	if err != nil {
 		if photo.ErrorCode(err) == photo.ENOTFOUND {
-			http.NotFound(w, r)
+			s.renderNotFound(w, r)
 		} else {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			s.renderServerError(w, r, err)
 		}
 		return
 	}
 
 	userID, authed := s.authenticatedUserID(r)
 	if !p.Published && !authed {
-		http.NotFound(w, r)
+		s.renderNotFound(w, r)
 		return
 	}
 
@@ -389,7 +391,7 @@ func buildBackURL(base string, q url.Values) string {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	st, err := s.StatusService.LibraryStatus(r.Context())
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		s.renderServerError(w, r, err)
 		return
 	}
 	s.render(w, r, "status.html", struct {
@@ -399,4 +401,23 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		baseData: s.newBase(r, "status"),
 		Status:   st,
 	})
+}
+
+// handleBackup streams a database backup to authenticated web UI users via
+// cookie session. Mirrors the API's /api/v1/backup but usable from a browser
+// link without needing a Bearer token.
+func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
+	if s.BackupService == nil {
+		s.renderServerError(w, r, fmt.Errorf("backup service not configured"))
+		return
+	}
+
+	filename := fmt.Sprintf("library-%s.db", time.Now().UTC().Format("2006-01-02"))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("Cache-Control", "private, no-store")
+
+	if err := s.BackupService.Backup(r.Context(), w); err != nil {
+		log.Printf("backup: %v", err)
+	}
 }

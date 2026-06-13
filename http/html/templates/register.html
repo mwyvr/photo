@@ -1,0 +1,60 @@
+{{define "title"}}Create account · Photo Library{{end}}
+
+{{define "content"}}
+<div class="login-wrap">
+  <div class="login-card">
+    <h1 class="login-title">Create your account</h1>
+
+    {{if .IsFirstUser}}
+    <p class="text-muted">You're setting up this photo library. This account will be the administrator.</p>
+    {{end}}
+
+    {{if .Error}}
+    <div class="form-error" role="alert">{{.Error}}</div>
+    {{end}}
+
+    <form class="login-form" method="POST" action="/register">
+      <input type="hidden" name="inviteToken" value="{{.InviteToken}}">
+
+      <div class="form-field">
+        <label for="username">Email</label>
+        <input type="email" id="username" name="username"
+               value="{{.Username}}" autocomplete="email"
+               autofocus required>
+      </div>
+
+      <div class="form-field">
+        <label for="firstName">First name</label>
+        <input type="text" id="firstName" name="firstName"
+               value="{{.FirstName}}" autocomplete="given-name"
+               placeholder="Optional">
+      </div>
+
+      <div class="form-field">
+        <label for="lastName">Last name</label>
+        <input type="text" id="lastName" name="lastName"
+               value="{{.LastName}}" autocomplete="family-name"
+               placeholder="Optional">
+      </div>
+
+      <div class="form-field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password"
+               autocomplete="new-password" minlength="8" required>
+      </div>
+
+      <div class="form-field">
+        <label for="confirm">Confirm password</label>
+        <input type="password" id="confirm" name="confirm"
+               autocomplete="new-password" minlength="8" required>
+      </div>
+
+      <button type="submit" class="btn btn-primary">Create account</button>
+    </form>
+
+    <p class="text-muted mt-md">
+      Already have an account? <a href="/login">Sign in</a>
+    </p>
+  </div>
+</div>
+{{end}}

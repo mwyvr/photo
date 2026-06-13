@@ -43,16 +43,26 @@ type authResponse struct {
 }
 
 type userJSON struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Email    string `json:"email"`
+	ID        string `json:"id"`
+	Username  string `json:"username"`
+	FirstName string `json:"firstName,omitempty"`
+	LastName  string `json:"lastName,omitempty"`
+	IsAdmin   bool   `json:"isAdmin"`
 }
 
-func (c *client) register(ctx context.Context, username, email, password string) (*authResponse, error) {
+func (c *client) register(ctx context.Context, username, firstName, lastName, password, inviteToken string) (*authResponse, error) {
 	body := map[string]string{
 		"username": username,
-		"email":    email,
-		"password": password,
+	}
+	if firstName != "" {
+		body["firstName"] = firstName
+	}
+	if lastName != "" {
+		body["lastName"] = lastName
+	}
+	body["password"] = password
+	if inviteToken != "" {
+		body["inviteToken"] = inviteToken
 	}
 	var resp authResponse
 	if err := c.do(ctx, http.MethodPost, "/api/v1/register", body, &resp); err != nil {
@@ -291,6 +301,14 @@ func (c *client) getStatus(ctx context.Context) (*statusJSON, error) {
 	return &st, nil
 }
 
+func (c *client) getAdminStatus(ctx context.Context) (*statusJSON, error) {
+	var st statusJSON
+	if err := c.do(ctx, http.MethodGet, "/api/v1/admin/status", nil, &st); err != nil {
+		return nil, err
+	}
+	return &st, nil
+}
+
 
 func (c *client) getPhoto(ctx context.Context, id string) (*photoJSON, error) {
 	var p photoJSON
@@ -419,4 +437,67 @@ func hashFileHex(path string) (string, error) {
 
 func openFile(path string) (*os.File, error) {
 	return os.Open(path)
+}
+
+// --- Invites ------------------------------------------------------------
+
+type inviteJSON struct {
+	ID        string  `json:"id"`
+	Token     string  `json:"token"`
+	CreatedBy string  `json:"createdBy"`
+	CreatedAt string  `json:"createdAt"`
+	ExpiresAt string  `json:"expiresAt"`
+	UsedAt    *string `json:"usedAt,omitempty"`
+	UsedBy    *string `json:"usedBy,omitempty"`
+}
+
+func (c *client) inviteCreate(ctx context.Context, ttlHours int) (*inviteJSON, error) {
+	body := map[string]int{"ttlHours": ttlHours}
+	var resp inviteJSON
+	if err := c.do(ctx, http.MethodPost, "/api/v1/admin/invites", body, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *client) inviteList(ctx context.Context) ([]inviteJSON, error) {
+	var resp struct {
+		Invites []inviteJSON `json:"invites"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/v1/admin/invites", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Invites, nil
+}
+
+func (c *client) inviteRevoke(ctx context.Context, token string) error {
+	return c.do(ctx, http.MethodDelete, "/api/v1/admin/invites/"+token, nil, nil)
+}
+
+// --- Backup ---------------------------------------------------------------
+
+// backup downloads the database backup and writes it to w.
+func (c *client) backup(ctx context.Context, w io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/backup", nil)
+	if err != nil {
+		return err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return errUnauthorized
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned %d", resp.StatusCode)
+	}
+
+	_, err = io.Copy(w, resp.Body)
+	return err
 }

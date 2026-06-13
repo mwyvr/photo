@@ -484,3 +484,17 @@ func (s *AlbumService) MovePhoto(ctx context.Context, albumID, photoID, afterPho
 func (s *AlbumService) FindAlbumPhotos(ctx context.Context, albumID kid.ID, offset, limit int) ([]*photo.Photo, int, error) {
 	return nil, 0, nil
 }
+
+// --- BackupService -----------------------------------------------------------
+
+type BackupService struct {
+	BackupFn func(ctx context.Context, w io.Writer) error
+}
+
+func (s *BackupService) Backup(ctx context.Context, w io.Writer) error {
+	if s.BackupFn != nil {
+		return s.BackupFn(ctx, w)
+	}
+	_, err := w.Write([]byte("mock-database-backup"))
+	return err
+}

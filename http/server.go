@@ -43,6 +43,8 @@ type Server struct {
 	Geocoder       photo.Geocoder
 	StatusService  photo.StatusService
 	AlbumService   photo.AlbumService
+	BackupService  photo.BackupService
+	InviteService  photo.InviteService
 
 	// JWTSecret is the HMAC-SHA256 signing key for JWT tokens.
 	// Generated once at server startup and stored in the server config file.
@@ -93,6 +95,11 @@ func (s *Server) registerRoutes() {
 	// Authenticated routes — wrapped in requireAuth middleware.
 	s.router.HandleFunc("DELETE /api/v1/logout", s.requireAuth(s.handleLogout))
 	s.router.HandleFunc("GET /api/v1/status", s.requireAuth(s.handleStatus))
+	s.router.HandleFunc("GET /api/v1/admin/status", s.requireAdmin(s.handleAdminStatus))
+	s.router.HandleFunc("GET /api/v1/backup", s.requireAdmin(s.handleBackup))
+	s.router.HandleFunc("POST /api/v1/admin/invites", s.requireAdmin(s.handleCreateInvite))
+	s.router.HandleFunc("GET /api/v1/admin/invites", s.requireAdmin(s.handleListInvites))
+	s.router.HandleFunc("DELETE /api/v1/admin/invites/{token}", s.requireAdmin(s.handleRevokeInvite))
 
 	s.router.HandleFunc("GET /api/v1/photos", s.requireAuth(s.handleListPhotos))
 	s.router.HandleFunc("GET /api/v1/photos/exists", s.requireAuth(s.handlePhotoExists))
@@ -110,9 +117,15 @@ func (s *Server) registerRoutes() {
 }
 
 // Router returns the underlying ServeMux so additional routes can be registered.
-// Used by the HTML UI package to share the same listener.
 func (s *Server) Router() *http.ServeMux {
 	return s.router
+}
+
+// WrapForTest applies the same middleware chain as ListenAndServe so that
+// tests exercise security headers and access logging. TrustedProxy is empty
+// (trust all X-Forwarded-For) which is fine for tests.
+func WrapForTest(h http.Handler) http.Handler {
+	return securityHeaders(accessLog(h, ""))
 }
 
 // ListenAndServe starts the HTTP server. It blocks until the context is done.
