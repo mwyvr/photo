@@ -133,7 +133,11 @@ func findPhotos(ctx context.Context, tx *Tx, filter photo.PhotoFilter) ([]*photo
 	args := []interface{}{}
 
 	if !filter.UserID.IsNil() {
-		where = append(where, "user_id = ?")
+		if filter.IncludeOthersPublished {
+			where = append(where, "(user_id = ? OR published = 1)")
+		} else {
+			where = append(where, "user_id = ?")
+		}
 		args = append(args, filter.UserID)
 	}
 	if v := filter.CapturedAfter; v != nil {

@@ -1,0 +1,40 @@
+{{define "title"}}Upload · Photo Library{{end}}
+
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Upload a photo</h1>
+</div>
+
+<div class="login-wrap">
+  <div class="login-card">
+
+    {{if .Error}}
+    <div class="form-error" role="alert">{{.Error}}</div>
+    {{end}}
+
+    {{if .Success}}
+    <div class="form-success" role="status">{{.Success}}</div>
+    {{end}}
+
+    <form class="login-form" method="POST" action="/upload" enctype="multipart/form-data">
+      <div class="form-field">
+        <label for="file">Photo</label>
+        <input type="file" id="file" name="file"
+               accept="image/*" required>
+        <p class="text-muted">JPEG, PNG, HEIC, or RAW formats. Max 200 MB.</p>
+      </div>
+
+      <div class="form-field">
+        <label class="form-checkbox-label">
+          <input type="checkbox" id="published" name="published">
+          Publish immediately (visible to everyone, including logged-out visitors)
+        </label>
+        <p class="text-muted">RAW files are never published automatically, regardless of this setting.</p>
+      </div>
+
+      <button type="submit" class="btn btn-primary">Upload</button>
+    </form>
+
+  </div>
+</div>
+{{end}}

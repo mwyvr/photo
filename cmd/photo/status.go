@@ -14,7 +14,7 @@ func runStatus(ctx context.Context, c *client, args []string) error {
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `Usage: photo status
 
-Display library statistics.
+Display statistics for your own photos.
 `)
 	}
 	fs.Parse(args) //nolint:errcheck
@@ -23,7 +23,11 @@ Display library statistics.
 	if err != nil {
 		return fmt.Errorf("status: %w", err)
 	}
+	return printStatus(st)
+}
 
+// printStatus writes a statusJSON in human-readable tabular form.
+func printStatus(st *statusJSON) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
 	fmt.Fprintln(w, "── Photos ───────────────────────────")

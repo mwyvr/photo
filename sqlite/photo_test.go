@@ -221,3 +221,66 @@ func TestPhotoService_NotFound(t *testing.T) {
 		t.Errorf("expected ENOTFOUND, got %q", photo.ErrorCode(err))
 	}
 }
+
+func TestPhotoService_FindPhotos_IncludeOthersPublished(t *testing.T) {
+	db := newTestDB(t)
+	userSvc := sqlite.NewUserService(db)
+	photoSvc := sqlite.NewPhotoService(db)
+	ctx := context.Background()
+
+	alice := makeUser(t, userSvc, "alice", "alice@example.com")
+	bob := makeUser(t, userSvc, "bob", "bob@example.com")
+
+	aliceUnpub := makePhoto(t, photoSvc, alice.ID, "alice-private.jpg", "hash-a1")
+	aliceA2 := makePhoto(t, photoSvc, alice.ID, "alice-public.jpg", "hash-a2")
+	bobPriv := makePhoto(t, photoSvc, bob.ID, "bob-private.jpg", "hash-b1")
+	bobPub := makePhoto(t, photoSvc, bob.ID, "bob-public.jpg", "hash-b2")
+
+	// Publish alice's second photo and bob's second photo.
+	pub := true
+	if _, err := photoSvc.UpdatePhoto(ctx, aliceA2.ID, photo.PhotoUpdate{Published: &pub}); err != nil {
+		t.Fatalf("publish alice photo: %v", err)
+	}
+	if _, err := photoSvc.UpdatePhoto(ctx, bobPub.ID, photo.PhotoUpdate{Published: &pub}); err != nil {
+		t.Fatalf("publish bob photo: %v", err)
+	}
+
+	// Without IncludeOthersPublished: alice sees only her own 2 photos.
+	photos, total, err := photoSvc.FindPhotos(ctx, photo.PhotoFilter{UserID: alice.ID})
+	if err != nil {
+		t.Fatalf("find photos (mine): %v", err)
+	}
+	if total != 2 {
+		t.Errorf("mine: total = %d, want 2", total)
+	}
+
+	// With IncludeOthersPublished: alice sees her own 2 + bob's 1 published = 3.
+	// bob's private photo (bobPriv) should not appear.
+	photos, total, err = photoSvc.FindPhotos(ctx, photo.PhotoFilter{
+		UserID:                 alice.ID,
+		IncludeOthersPublished: true,
+	})
+	if err != nil {
+		t.Fatalf("find photos (all published): %v", err)
+	}
+	if total != 3 {
+		t.Errorf("all published: total = %d, want 3", total)
+	}
+
+	ids := make(map[kid.ID]bool)
+	for _, p := range photos {
+		ids[p.ID] = true
+	}
+	if !ids[aliceUnpub.ID] {
+		t.Error("expected alice's unpublished photo to be included (own photo)")
+	}
+	if !ids[aliceA2.ID] {
+		t.Error("expected alice's published photo to be included")
+	}
+	if !ids[bobPub.ID] {
+		t.Error("expected bob's published photo to be included")
+	}
+	if ids[bobPriv.ID] {
+		t.Error("did not expect bob's private photo to be included")
+	}
+}

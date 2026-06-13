@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -29,8 +30,10 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 		Limit:  pageSize,
 		Offset: offset,
 	}
+	scopeAll := q.Get("scope") == "all"
 	if authed {
 		filter.UserID = userID
+		filter.IncludeOthersPublished = scopeAll
 	} else {
 		t := true
 		filter.Published = &t
@@ -65,6 +68,7 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 		Tag      string
 		After    string
 		Before   string
+		Scope    string
 		Active   bool
 	}
 	qs := queryState{
@@ -72,6 +76,7 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 		Tag:      q.Get("tag"),
 		After:    q.Get("after"),
 		Before:   q.Get("before"),
+		Scope:    q.Get("scope"),
 	}
 	qs.Active = qs.Location != "" || qs.Tag != "" || qs.After != "" || qs.Before != ""
 
@@ -90,10 +95,33 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 	if qs.Before != "" {
 		ctxParams.Set("before", qs.Before)
 	}
+	if qs.Scope != "" {
+		ctxParams.Set("scope", qs.Scope)
+	}
 	if offset > 0 {
 		ctxParams.Set("offset", strconv.Itoa(offset))
 	}
 	ctxQuery := ctxParams.Encode()
+
+	// Scope toggle links preserve other filters but reset pagination and
+	// switch the scope param.
+	scopeMineParams := url.Values{}
+	scopeAllParams := url.Values{}
+	for _, p := range []url.Values{scopeMineParams, scopeAllParams} {
+		if qs.Location != "" {
+			p.Set("location", qs.Location)
+		}
+		if qs.Tag != "" {
+			p.Set("tag", qs.Tag)
+		}
+		if qs.After != "" {
+			p.Set("after", qs.After)
+		}
+		if qs.Before != "" {
+			p.Set("before", qs.Before)
+		}
+	}
+	scopeAllParams.Set("scope", "all")
 
 	var prevPage, nextPage string
 	if offset > 0 {
@@ -109,22 +137,26 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 
 	s.render(w, r, "grid.html", struct {
 		baseData
-		Photos   []*photo.Photo
-		Total    int
-		Query    queryState
-		CtxQuery template.URL
-		PrevPage string
-		NextPage string
-		PageInfo string
+		Photos         []*photo.Photo
+		Total          int
+		Query          queryState
+		CtxQuery       template.URL
+		PrevPage       string
+		NextPage       string
+		PageInfo       string
+		ScopeMineQuery template.URL
+		ScopeAllQuery  template.URL
 	}{
-		baseData: s.newBase(r, "grid"),
-		Photos:   photos,
-		Total:    total,
-		Query:    qs,
-		CtxQuery: template.URL(ctxQuery),
-		PrevPage: prevPage,
-		NextPage: nextPage,
-		PageInfo: pageInfo(offset, pageSize, total),
+		baseData:       s.newBase(r, "grid"),
+		Photos:         photos,
+		Total:          total,
+		Query:          qs,
+		CtxQuery:       template.URL(ctxQuery),
+		PrevPage:       prevPage,
+		NextPage:       nextPage,
+		PageInfo:       pageInfo(offset, pageSize, total),
+		ScopeMineQuery: template.URL(scopeMineParams.Encode()),
+		ScopeAllQuery:  template.URL(scopeAllParams.Encode()),
 	})
 }
 
@@ -204,6 +236,7 @@ func (s *Server) adjacentInGrid(r *http.Request, currentID kid.ID, userID kid.ID
 	}
 	if authed {
 		filter.UserID = userID
+		filter.IncludeOthersPublished = q.Get("scope") == "all"
 	} else {
 		t := true
 		filter.Published = &t
@@ -388,17 +421,44 @@ func buildBackURL(base string, q url.Values) string {
 	return base + "?" + params.Encode()
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	st, err := s.StatusService.LibraryStatus(r.Context())
+// handleMe renders the personal status/account page for the logged-in user.
+// Shows stats scoped to that user's own photos. Available to any authenticated user.
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	userID, _ := s.authenticatedUserID(r)
+	st, err := s.StatusService.LibraryStatus(r.Context(), &userID)
 	if err != nil {
 		s.renderServerError(w, r, err)
 		return
 	}
-	s.render(w, r, "status.html", struct {
+	u, err := s.UserService.FindUserByID(r.Context(), userID)
+	if err != nil {
+		s.renderServerError(w, r, err)
+		return
+	}
+	s.render(w, r, "me.html", struct {
+		baseData
+		User   *photo.User
+		Status interface{}
+	}{
+		baseData: s.newBase(r, "me"),
+		User:     u,
+		Status:   st,
+	})
+}
+
+// handleAdminStatus renders system-wide statistics across all users.
+// Admin only — includes the database backup link.
+func (s *Server) handleAdminStatus(w http.ResponseWriter, r *http.Request) {
+	st, err := s.StatusService.LibraryStatus(r.Context(), (*kid.ID)(nil))
+	if err != nil {
+		s.renderServerError(w, r, err)
+		return
+	}
+	s.render(w, r, "admin_status.html", struct {
 		baseData
 		Status interface{}
 	}{
-		baseData: s.newBase(r, "status"),
+		baseData: s.newBase(r, "admin_status"),
 		Status:   st,
 	})
 }
@@ -420,4 +480,89 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 	if err := s.BackupService.Backup(r.Context(), w); err != nil {
 		log.Printf("backup: %v", err)
 	}
+}
+
+// uploadFormData holds the data passed to upload.html.
+type uploadFormData struct {
+	baseData
+	Error   string
+	Success string
+}
+
+// handleUploadForm renders the upload page. Authenticated users only.
+func (s *Server) handleUploadForm(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, "upload.html", uploadFormData{
+		baseData: s.newBase(r, "upload"),
+	})
+}
+
+// handleUploadPost handles a file upload from the web form.
+// Mirrors the API's POST /api/v1/photos but renders a page rather than JSON,
+// and supports a "published" checkbox from the form.
+func (s *Server) handleUploadPost(w http.ResponseWriter, r *http.Request) {
+	userID, _ := s.authenticatedUserID(r)
+
+	renderError := func(msg string) {
+		s.render(w, r, "upload.html", uploadFormData{
+			baseData: s.newBase(r, "upload"),
+			Error:    msg,
+		})
+	}
+
+	// Limit upload size to 200 MB, matching the API.
+	r.Body = http.MaxBytesReader(w, r.Body, 200<<20)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		renderError("File is too large or the upload was interrupted. Please try again.")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		renderError("Please choose a file to upload.")
+		return
+	}
+	defer file.Close()
+
+	safeFilename := filepath.Base(header.Filename)
+
+	// "published" checkbox: if checked, the form sends "on"; if unchecked,
+	// the field is absent entirely. Fall back to server default otherwise.
+	var published bool
+	if r.FormValue("published") != "" {
+		published = true
+	} else {
+		published = s.PublishDefault
+	}
+
+	opts := photo.ImportOptions{
+		UserID:    userID,
+		Published: published,
+	}
+
+	result := s.Importer.ImportReader(r.Context(), file, safeFilename, opts)
+	if result.Err != nil {
+		renderError(fmt.Sprintf("Upload failed: %v", result.Err))
+		return
+	}
+	if result.Skipped {
+		renderError(fmt.Sprintf("Skipped: %s", result.SkipReason))
+		return
+	}
+
+	// If publishDefault is true but the file turned out to be RAW, correct it
+	// — RAW files are never published by default.
+	if result.Photo.IsRaw && published && r.FormValue("published") == "" {
+		f := false
+		if _, err := s.PhotoService.UpdatePhoto(r.Context(), result.Photo.ID, photo.PhotoUpdate{
+			Published: &f,
+		}); err != nil {
+			log.Printf("correct RAW published flag for %s: %v", result.Photo.ID, err)
+		}
+		result.Photo.Published = false
+	}
+
+	s.render(w, r, "upload.html", uploadFormData{
+		baseData: s.newBase(r, "upload"),
+		Success:  fmt.Sprintf("Uploaded %s.", safeFilename),
+	})
 }

@@ -10,6 +10,13 @@
   {{if .Total}}<p class="page-subtitle">{{.Total}} photo{{if ne .Total 1}}s{{end}}</p>{{end}}
 </div>
 
+{{if .Authenticated}}
+<div class="scope-toggle">
+  <a href="?{{.ScopeMineQuery}}" class="scope-toggle-link{{if ne .Query.Scope "all"}} active{{end}}">My Photos</a>
+  <a href="?{{.ScopeAllQuery}}" class="scope-toggle-link{{if eq .Query.Scope "all"}} active{{end}}">All Published</a>
+</div>
+{{end}}
+
 <form class="search-form" method="GET" action="/">
   <div class="search-field">
     <label for="q-location">Location</label>

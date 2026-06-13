@@ -17,6 +17,11 @@
         <li><a href="/" {{if eq .Page "grid"}}aria-current="page"{{end}}>Library</a></li>
         <li><a href="/albums" {{if eq .Page "albums"}}aria-current="page"{{end}}>Albums</a></li>
         {{if .Authenticated}}
+        <li><a href="/upload" {{if eq .Page "upload"}}aria-current="page"{{end}}>Upload</a></li>
+        {{if .IsAdmin}}
+        <li><a href="/admin/status" {{if eq .Page "admin_status"}}aria-current="page"{{end}}>Admin</a></li>
+        {{end}}
+        <li><a href="/me" {{if eq .Page "me"}}aria-current="page"{{end}}>{{.DisplayName}}</a></li>
         <li><a href="/logout">Sign out</a></li>
         {{else}}
         <li><a href="/login">Sign in</a></li>
@@ -33,9 +38,6 @@
 
   <footer class="site-footer">
     <div class="container">
-      {{if .Authenticated}}
-      <a href="/status">Status</a> ·
-      {{end}}
       photo library
     </div>
   </footer>

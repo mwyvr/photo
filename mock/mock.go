@@ -320,6 +320,12 @@ func (s *UserService) FindUserByUsername(ctx context.Context, username string) (
 	return &cp, nil
 }
 
+func (s *UserService) CountUsers(ctx context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.users), nil
+}
+
 // --- SessionService ---------------------------------------------------------
 
 type SessionService struct {
@@ -379,7 +385,7 @@ func (s *SessionService) DeleteExpiredSessions(ctx context.Context) error {
 
 type StatusService struct{}
 
-func (s *StatusService) LibraryStatus(ctx context.Context) (*photo.LibraryStatus, error) {
+func (s *StatusService) LibraryStatus(ctx context.Context, userID *kid.ID) (*photo.LibraryStatus, error) {
 	return &photo.LibraryStatus{}, nil
 }
 
@@ -497,4 +503,80 @@ func (s *BackupService) Backup(ctx context.Context, w io.Writer) error {
 	}
 	_, err := w.Write([]byte("mock-database-backup"))
 	return err
+}
+
+// --- InviteService -----------------------------------------------------------
+
+type InviteService struct {
+	mu      sync.Mutex
+	invites map[string]*photo.Invite // keyed by token
+}
+
+func NewInviteService() *InviteService {
+	return &InviteService{invites: make(map[string]*photo.Invite)}
+}
+
+func (s *InviteService) CreateInvite(ctx context.Context, createdBy kid.ID, ttl time.Duration) (*photo.Invite, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	inv := &photo.Invite{
+		ID:        kid.New(),
+		Token:     kid.New().String(), // reuse kid for a unique-enough token in tests
+		CreatedBy: createdBy,
+		CreatedAt: now,
+		ExpiresAt: now.Add(ttl),
+	}
+	s.invites[inv.Token] = inv
+	cp := *inv
+	return &cp, nil
+}
+
+func (s *InviteService) FindInviteByToken(ctx context.Context, token string) (*photo.Invite, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	inv, ok := s.invites[token]
+	if !ok {
+		return nil, photo.Errorf(photo.ENOTFOUND, "invite not found")
+	}
+	cp := *inv
+	return &cp, nil
+}
+
+func (s *InviteService) MarkInviteUsed(ctx context.Context, token string, usedBy kid.ID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	inv, ok := s.invites[token]
+	if !ok {
+		return photo.Errorf(photo.ENOTFOUND, "invite not found")
+	}
+	if !inv.IsValid() {
+		return photo.Errorf(photo.ECONFLICT, "invite already used or expired")
+	}
+	now := time.Now()
+	inv.UsedAt = &now
+	inv.UsedBy = &usedBy
+	return nil
+}
+
+func (s *InviteService) FindInvites(ctx context.Context) ([]*photo.Invite, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*photo.Invite
+	for _, inv := range s.invites {
+		cp := *inv
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (s *InviteService) DeleteInvite(ctx context.Context, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	inv, ok := s.invites[token]
+	if !ok || inv.UsedAt != nil {
+		return photo.Errorf(photo.ENOTFOUND, "invite not found or already used")
+	}
+	delete(s.invites, token)
+	return nil
 }

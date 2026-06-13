@@ -42,11 +42,17 @@ var assets embed.FS
 // Server serves the HTML web UI.
 type Server struct {
 	PhotoService   photo.PhotoService
+	Importer       photo.Importer
+
+	// PublishDefault controls default visibility for uploads where the user
+	// hasn't explicitly chosen. RAW files are always unpublished regardless.
+	PublishDefault bool
 	AlbumService   photo.AlbumService
 	SessionService photo.SessionService
 	UserService    photo.UserService
 	StatusService  photo.StatusService
 	BackupService  photo.BackupService
+	InviteService  photo.InviteService
 
 	// JWTSecret must match the API server's secret.
 	JWTSecret []byte
@@ -158,14 +164,19 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// Auth.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.handleLoginPost)
+	mux.HandleFunc("GET /register", s.handleRegisterForm)
+	mux.HandleFunc("POST /register", s.handleRegisterPost)
 	mux.HandleFunc("GET /logout", s.handleLogout)
 
 	// UI pages — unauthenticated routes show published-only content.
 	mux.HandleFunc("GET /", s.handleGrid)
 	mux.HandleFunc("GET /albums", s.handleAlbumList)
 	mux.HandleFunc("GET /albums/{id}", s.handleAlbumDetail)
-	mux.HandleFunc("GET /status", s.requireAuth(s.handleStatus))
-	mux.HandleFunc("GET /backup", s.requireAuth(s.handleBackup))
+	mux.HandleFunc("GET /me", s.requireAuth(s.handleMe))
+	mux.HandleFunc("GET /upload", s.requireAuth(s.handleUploadForm))
+	mux.HandleFunc("POST /upload", s.requireAuth(s.handleUploadPost))
+	mux.HandleFunc("GET /admin/status", s.requireAdmin(s.handleAdminStatus))
+	mux.HandleFunc("GET /backup", s.requireAdmin(s.handleBackup))
 }
 
 // --- base template data ----------------------------------------------------
@@ -174,11 +185,21 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 type baseData struct {
 	Page          string
 	Authenticated bool
+	IsAdmin       bool
+	DisplayName   string
 }
 
 func (s *Server) newBase(r *http.Request, page string) baseData {
-	_, authed := s.authenticatedUserID(r)
-	return baseData{Page: page, Authenticated: authed}
+	userID, authed := s.authenticatedUserID(r)
+	isAdmin := false
+	displayName := ""
+	if authed {
+		if u, err := s.UserService.FindUserByID(r.Context(), userID); err == nil {
+			isAdmin = u.IsAdmin
+			displayName = u.DisplayName()
+		}
+	}
+	return baseData{Page: page, Authenticated: authed, IsAdmin: isAdmin, DisplayName: displayName}
 }
 
 // render executes the named template with data, writing to w.
@@ -266,6 +287,20 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// requireAdmin wraps requireAuth and additionally checks the user is an admin.
+// Renders a 404 (not 403) for non-admins to avoid revealing the route exists.
+func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return s.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		userID, _ := s.authenticatedUserID(r)
+		u, err := s.UserService.FindUserByID(r.Context(), userID)
+		if err != nil || !u.IsAdmin {
+			s.renderNotFound(w, r)
+			return
+		}
+		next(w, r)
+	})
 }
 
 // --- JWT (reuses logic from http/auth.go) ----------------------------------

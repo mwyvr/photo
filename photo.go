@@ -134,6 +134,13 @@ type PhotoFilter struct {
 	// Nil means no filter — return both. Used by the public web UI.
 	Published *bool
 
+	// IncludeOthersPublished, when true alongside UserID, broadens the
+	// result set to (user_id = UserID OR published = true) — i.e. the
+	// requesting user's own photos (any visibility) plus everyone else's
+	// published photos. Used by the authenticated grid's "all published"
+	// view in a shared library. Has no effect if UserID is unset.
+	IncludeOthersPublished bool
+
 	Offset int
 	Limit  int
 }

@@ -1,14 +1,15 @@
-{{define "title"}}Status · Photo Library{{end}}
+{{define "title"}}{{.User.DisplayName}} · Photo Library{{end}}
 
 {{define "content"}}
 <div class="page-header">
-  <h1 class="page-title">Library Status</h1>
+  <h1 class="page-title">{{.User.DisplayName}}</h1>
+  <p class="text-muted">{{.User.Username}}{{if .User.IsAdmin}} · Administrator{{end}}</p>
 </div>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--space-md)">
 
   <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:var(--space-lg)">
-    <h2 class="meta-section-title">Photos</h2>
+    <h2 class="meta-section-title">Your Photos</h2>
     <div class="meta-row mt-sm"><span class="meta-label">Total</span><span class="meta-value">{{.Status.TotalPhotos}}</span></div>
     <div class="meta-row"><span class="meta-label">RAW</span><span class="meta-value">{{.Status.TotalRAW}}</span></div>
     <div class="meta-row"><span class="meta-label">Non-RAW</span><span class="meta-value">{{.Status.TotalNonRAW}}</span></div>
@@ -25,8 +26,8 @@
   </div>
 
   <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius-md);padding:var(--space-lg)">
-    <h2 class="meta-section-title">Library</h2>
-    <div class="meta-row mt-sm"><span class="meta-label">Tags</span><span class="meta-value">{{.Status.TotalTags}}</span></div>
+    <h2 class="meta-section-title">Your Library</h2>
+    <div class="meta-row mt-sm"><span class="meta-label">Tags used</span><span class="meta-value">{{.Status.TotalTags}}</span></div>
     <div class="meta-row"><span class="meta-label">Albums</span><span class="meta-value">{{.Status.TotalAlbums}}</span></div>
     {{if .Status.OldestCapturedAt}}
     <div class="meta-row"><span class="meta-label">Oldest</span><span class="meta-value">{{.Status.OldestCapturedAt.Format "2006-01-02"}}</span></div>
@@ -40,7 +41,7 @@
 
 {{if .IsAdmin}}
 <div class="mt-lg" style="text-align:right">
-  <a href="/backup" class="btn btn-ghost" download>↓ Download database backup</a>
+  <a href="/admin/status" class="btn btn-ghost">System status →</a>
 </div>
 {{end}}
 {{end}}

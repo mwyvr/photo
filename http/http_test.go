@@ -28,6 +28,7 @@ func testServer(t *testing.T) (*photohttp.Server, *httptest.Server) {
 	srv.StatusService = &mock.StatusService{}
 	srv.AlbumService = mock.NewAlbumService()
 	srv.BackupService = &mock.BackupService{}
+	srv.InviteService = mock.NewInviteService()
 	srv.LibraryRoot = t.TempDir()
 
 	ts := httptest.NewServer(photohttp.WrapForTest(srv.Router()))
@@ -36,12 +37,18 @@ func testServer(t *testing.T) (*photohttp.Server, *httptest.Server) {
 }
 
 // registerAndLogin creates a user and returns a valid Bearer token.
+// username may be a bare name (e.g. "alice") — it will be used as the
+// local part of the email-format username (e.g. "alice@example.com").
 func registerAndLogin(t *testing.T, ts *httptest.Server, username, password string) string {
 	t.Helper()
 
+	email := username
+	if !strings.Contains(email, "@") {
+		email = username + "@example.com"
+	}
+
 	body, _ := json.Marshal(map[string]string{
-		"username": username,
-		"email":    username + "@example.com",
+		"username": email,
 		"password": password,
 	})
 	resp, err := ts.Client().Post(ts.URL+"/api/v1/register",
@@ -75,7 +82,7 @@ func TestRegister(t *testing.T) {
 	_, ts := testServer(t)
 
 	body, _ := json.Marshal(map[string]string{
-		"username": "alice", "email": "alice@example.com", "password": "password123",
+		"username": "alice@example.com", "password": "password123",
 	})
 	resp, err := ts.Client().Post(ts.URL+"/api/v1/register", "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -432,5 +439,156 @@ func TestBackup_Unauthenticated(t *testing.T) {
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+// --- Admin / invite tests -----------------------------------------------------
+
+func TestFirstUser_IsAdmin(t *testing.T) {
+	_, ts := testServer(t)
+	token := registerAndLogin(t, ts, "alice", "password123")
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/backup", nil)
+	req.Header.Set("Authorization", authHeader(token))
+	resp, _ := ts.Client().Do(req)
+	defer resp.Body.Close()
+
+	// First user is admin, so backup (admin-only) should succeed.
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("first user backup access: status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestRegister_SecondUserRequiresInvite(t *testing.T) {
+	_, ts := testServer(t)
+	registerAndLogin(t, ts, "alice", "password123") // first user, no invite needed
+
+	// Second user without invite token should be rejected.
+	body, _ := json.Marshal(map[string]string{
+		"username": "bob@example.com", "password": "password123",
+	})
+	resp, _ := ts.Client().Post(ts.URL+"/api/v1/register", "application/json", bytes.NewReader(body))
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("second user without invite: status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestRegister_SecondUserWithValidInvite(t *testing.T) {
+	_, ts := testServer(t)
+	aliceToken := registerAndLogin(t, ts, "alice", "password123")
+
+	// Alice (admin) creates an invite.
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/admin/invites",
+		bytes.NewReader([]byte(`{"ttlHours":24}`)))
+	req.Header.Set("Authorization", authHeader(aliceToken))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create invite: status = %d, want 201", resp.StatusCode)
+	}
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	json.NewDecoder(resp.Body).Decode(&inv) //nolint
+
+	// Bob registers using the invite token.
+	body, _ := json.Marshal(map[string]string{
+		"username": "bob@example.com",
+		"password": "password123", "inviteToken": inv.Token,
+	})
+	resp2, _ := ts.Client().Post(ts.URL+"/api/v1/register", "application/json", bytes.NewReader(body))
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusCreated {
+		t.Errorf("register with valid invite: status = %d, want 201", resp2.StatusCode)
+	}
+
+	var result struct {
+		User struct {
+			IsAdmin bool `json:"isAdmin"`
+		} `json:"user"`
+	}
+	json.NewDecoder(resp2.Body).Decode(&result) //nolint
+	if result.User.IsAdmin {
+		t.Error("second user should not be admin")
+	}
+}
+
+func TestRegister_InviteCannotBeReused(t *testing.T) {
+	_, ts := testServer(t)
+	aliceToken := registerAndLogin(t, ts, "alice", "password123")
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/admin/invites",
+		bytes.NewReader([]byte(`{"ttlHours":24}`)))
+	req.Header.Set("Authorization", authHeader(aliceToken))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := ts.Client().Do(req)
+	defer resp.Body.Close()
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	json.NewDecoder(resp.Body).Decode(&inv) //nolint
+
+	register := func(username string) int {
+		body, _ := json.Marshal(map[string]string{
+			"username": username + "@example.com",
+			"password": "password123", "inviteToken": inv.Token,
+		})
+		r, _ := ts.Client().Post(ts.URL+"/api/v1/register", "application/json", bytes.NewReader(body))
+		defer r.Body.Close()
+		return r.StatusCode
+	}
+
+	if status := register("bob"); status != http.StatusCreated {
+		t.Fatalf("first use: status = %d, want 201", status)
+	}
+	if status := register("carol"); status != http.StatusForbidden {
+		t.Errorf("reuse: status = %d, want 403", status)
+	}
+}
+
+func TestBackup_NonAdminForbidden(t *testing.T) {
+	_, ts := testServer(t)
+	aliceToken := registerAndLogin(t, ts, "alice", "password123") // admin
+
+	// Create invite, register bob (non-admin).
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/admin/invites",
+		bytes.NewReader([]byte(`{"ttlHours":24}`)))
+	req.Header.Set("Authorization", authHeader(aliceToken))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := ts.Client().Do(req)
+	var inv struct {
+		Token string `json:"token"`
+	}
+	json.NewDecoder(resp.Body).Decode(&inv) //nolint
+	resp.Body.Close()
+
+	body, _ := json.Marshal(map[string]string{
+		"username": "bob@example.com",
+		"password": "password123", "inviteToken": inv.Token,
+	})
+	resp2, _ := ts.Client().Post(ts.URL+"/api/v1/register", "application/json", bytes.NewReader(body))
+	var bobAuth struct {
+		Token string `json:"token"`
+	}
+	json.NewDecoder(resp2.Body).Decode(&bobAuth) //nolint
+	resp2.Body.Close()
+
+	// Bob (non-admin) tries to access backup.
+	req3, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/backup", nil)
+	req3.Header.Set("Authorization", authHeader(bobAuth.Token))
+	resp3, _ := ts.Client().Do(req3)
+	defer resp3.Body.Close()
+
+	if resp3.StatusCode != http.StatusForbidden {
+		t.Errorf("non-admin backup access: status = %d, want 403", resp3.StatusCode)
 	}
 }
