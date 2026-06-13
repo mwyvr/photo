@@ -64,6 +64,11 @@ type Server struct {
 	// isSecureRequest for correct Secure cookie handling.
 	TrustedProxy string
 
+	// PublicBaseURL is the externally-visible base URL, used for absolute
+	// links in the RSS feed (e.g. "https://photos.yourdomain.com").
+	// If empty, /feed.xml returns 404.
+	PublicBaseURL string
+
 	// authLimiter rate-limits failed web UI login attempts per IP.
 	authLimiter *htmlRateLimiter
 }
@@ -170,12 +175,15 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 	// UI pages — unauthenticated routes show published-only content.
 	mux.HandleFunc("GET /", s.handleGrid)
+	mux.HandleFunc("GET /feed.xml", s.handleFeed)
 	mux.HandleFunc("GET /albums", s.handleAlbumList)
 	mux.HandleFunc("GET /albums/{id}", s.handleAlbumDetail)
+	mux.HandleFunc("GET /albums/{id}/cover", s.handleAlbumCover)
 	mux.HandleFunc("GET /me", s.requireAuth(s.handleMe))
 	mux.HandleFunc("GET /upload", s.requireAuth(s.handleUploadForm))
 	mux.HandleFunc("POST /upload", s.requireAuth(s.handleUploadPost))
 	mux.HandleFunc("GET /admin/status", s.requireAdmin(s.handleAdminStatus))
+	mux.HandleFunc("GET /admin/users", s.requireAdmin(s.handleAdminUsers))
 	mux.HandleFunc("GET /backup", s.requireAdmin(s.handleBackup))
 }
 
@@ -187,6 +195,7 @@ type baseData struct {
 	Authenticated bool
 	IsAdmin       bool
 	DisplayName   string
+	FeedEnabled   bool
 }
 
 func (s *Server) newBase(r *http.Request, page string) baseData {
@@ -199,7 +208,13 @@ func (s *Server) newBase(r *http.Request, page string) baseData {
 			displayName = u.DisplayName()
 		}
 	}
-	return baseData{Page: page, Authenticated: authed, IsAdmin: isAdmin, DisplayName: displayName}
+	return baseData{
+		Page:          page,
+		Authenticated: authed,
+		IsAdmin:       isAdmin,
+		DisplayName:   displayName,
+		FeedEnabled:   s.PublicBaseURL != "",
+	}
 }
 
 // render executes the named template with data, writing to w.

@@ -125,11 +125,18 @@ func run(ctx context.Context) error {
 	ui.JWTSecret = cfg.JWTSecret
 	ui.LibraryRoot = cfg.LibraryRoot
 	ui.TrustedProxy = cfg.TrustedProxy
+	ui.PublicBaseURL = cfg.PublicBaseURL
 	ui.RegisterRoutes(srv.Router())
 
+	log.Printf("photod config:          %s", cfgPath)
 	log.Printf("photod library:         %s", cfg.LibraryRoot)
 	log.Printf("photod database:        %s", cfg.DBPath())
 	log.Printf("photod publish default: %v (RAW always false)", cfg.PublishDefault)
+	if cfg.PublicBaseURL != "" {
+		log.Printf("photod public base URL: %s (RSS feed enabled at /feed.xml)", cfg.PublicBaseURL)
+	} else {
+		log.Printf("photod public base URL: (not set; RSS feed disabled)")
+	}
 	log.Printf("photod web UI:          http://%s/", cfg.Addr)
 	log.Printf("photod API:             http://%s/api/v1/", cfg.Addr)
 	return srv.ListenAndServe(ctx)
@@ -161,6 +168,11 @@ type ServerConfig struct {
 	// Use "127.0.0.1" when running behind a local proxy.
 	// Leave empty to trust X-Forwarded-For from any source (less secure).
 	TrustedProxy string `json:"trustedProxy,omitempty"`
+
+	// PublicBaseURL is the externally-visible base URL of this server,
+	// e.g. "https://photos.yourdomain.com" (no trailing slash). Used to
+	// build absolute links in the RSS feed. If empty, the feed is disabled.
+	PublicBaseURL string `json:"publicBaseUrl,omitempty"`
 
 	// JWTSecret is the decoded form of JWTSecretHex. Not persisted.
 	JWTSecret []byte `json:"-"`
