@@ -10,6 +10,27 @@ import (
 	"time"
 )
 
+// --- CSRF / cross-origin protection -----------------------------------------
+
+// crossOriginProtection wraps a handler with net/http's CrossOriginProtection
+// (Go 1.25+), which blocks unsafe cross-origin browser requests by checking
+// the Sec-Fetch-Site header (modern browsers) and falling back to comparing
+// Origin against Host (older browsers that send Origin on POST).
+//
+// Requests with neither header — non-browser clients such as the photo CLI
+// using Bearer token auth — are not browser-originated and are not subject
+// to this check, by design of CrossOriginProtection.
+//
+// This is defense-in-depth alongside the SameSite=Lax session cookie: it
+// protects state-changing API requests regardless of Content-Type, closing
+// the gap where a cross-site form POST with enctype="text/plain" could
+// otherwise be parsed as JSON by json.Decoder (which ignores both the
+// declared Content-Type and trailing bytes after a valid JSON document).
+func crossOriginProtection(next http.Handler) http.Handler {
+	protection := http.NewCrossOriginProtection()
+	return protection.Handler(next)
+}
+
 // --- Access logging ---------------------------------------------------------
 
 // responseWriter wraps http.ResponseWriter to capture status code and bytes written.

@@ -592,3 +592,74 @@ func TestBackup_NonAdminForbidden(t *testing.T) {
 		t.Errorf("non-admin backup access: status = %d, want 403", resp3.StatusCode)
 	}
 }
+
+// --- Cross-origin protection tests -------------------------------------------
+
+func TestCrossOriginProtection_BlocksCrossSitePost(t *testing.T) {
+	_, ts := testServer(t)
+	token := registerAndLogin(t, ts, "alice", "password123")
+
+	// Simulate a cross-site browser POST: Origin differs from the request's
+	// own host, and Sec-Fetch-Site indicates cross-site.
+	body, _ := json.Marshal(map[string]string{"description": "hijacked"})
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/photos/06bq7xhnr03mlz6r",
+		bytes.NewReader(body))
+	req.Header.Set("Authorization", authHeader(token))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("cross-site POST: status = %d, want 403 (CrossOriginProtection)", resp.StatusCode)
+	}
+}
+
+func TestCrossOriginProtection_AllowsNonBrowserRequests(t *testing.T) {
+	_, ts := testServer(t)
+	token := registerAndLogin(t, ts, "alice", "password123")
+
+	// A request with no Origin/Sec-Fetch-Site header — like the CLI using
+	// Bearer token auth — is treated as non-browser and is not subject to
+	// CrossOriginProtection.
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/status", nil)
+	req.Header.Set("Authorization", authHeader(token))
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("non-browser request: status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestCrossOriginProtection_AllowsSameOriginPost(t *testing.T) {
+	_, ts := testServer(t)
+
+	// A same-origin browser POST (Sec-Fetch-Site: same-origin) should pass
+	// CrossOriginProtection. Use registration, which is unauthenticated.
+	body, _ := json.Marshal(map[string]string{
+		"username": "sameorigin@example.com", "password": "password123",
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("same-origin POST: status = %d, want 201", resp.StatusCode)
+	}
+}

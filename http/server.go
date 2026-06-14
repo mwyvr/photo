@@ -128,7 +128,7 @@ func (s *Server) Router() *http.ServeMux {
 // tests exercise security headers and access logging. TrustedProxy is empty
 // (trust all X-Forwarded-For) which is fine for tests.
 func WrapForTest(h http.Handler) http.Handler {
-	return securityHeaders(accessLog(h, ""))
+	return securityHeaders(accessLog(crossOriginProtection(h), ""))
 }
 
 // ListenAndServe starts the HTTP server. It blocks until the context is done.
@@ -137,7 +137,7 @@ func WrapForTest(h http.Handler) http.Handler {
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	// Build middleware chain here so TrustedProxy is available.
 	s.authLimiter = newRateLimiter(5, time.Minute, s.TrustedProxy)
-	s.server.Handler = securityHeaders(accessLog(s.router, s.TrustedProxy))
+	s.server.Handler = securityHeaders(accessLog(crossOriginProtection(s.router), s.TrustedProxy))
 
 	go s.cleanupSessions(ctx)
 
