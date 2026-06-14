@@ -160,16 +160,39 @@
       <h2 class="meta-section-title">Share</h2>
       <div class="meta-row">
         <span class="meta-label">URL</span>
-        <span class="meta-value">
-          <code>/p/{{.Photo.ID}}</code>
+        <span class="meta-value share-value">
+          <code><a href="{{.PhotoPublicURL}}" target="_blank" rel="noopener">{{.PhotoPublicURL}}</a></code>
+          <button type="button" class="copy-btn" data-copy="{{.PhotoPublicURL}}" aria-label="Copy URL" title="Copy URL">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          </button>
         </span>
       </div>
       <div class="meta-row">
         <span class="meta-label">Hugo</span>
-        <span class="meta-value">
+        <span class="meta-value share-value">
           <code>{{`{{`}}< photo id="{{.Photo.ID}}" >{{`}}`}}</code>
+          <button type="button" class="copy-btn" data-copy='{{`{{`}}< photo id="{{.Photo.ID}}" >{{`}}`}}' aria-label="Copy Hugo shortcode" title="Copy Hugo shortcode">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          </button>
         </span>
       </div>
+      {{if .IsOwner}}
+      <form method="POST" action="/photo/{{.Photo.ID}}/publish" class="mt-sm">
+        <input type="hidden" name="published" value="false">
+        <input type="hidden" name="next" value="{{.CurrentURL}}">
+        <button type="submit" class="btn btn-ghost">Unpublish</button>
+      </form>
+      {{end}}
+    </div>
+    {{else if .IsOwner}}
+    <div class="meta-section">
+      <h2 class="meta-section-title">Share</h2>
+      <p class="text-muted">This photo is private. Publish it to get a shareable link and Hugo shortcode.</p>
+      <form method="POST" action="/photo/{{.Photo.ID}}/publish" class="mt-sm">
+        <input type="hidden" name="published" value="true">
+        <input type="hidden" name="next" value="{{.CurrentURL}}">
+        <button type="submit" class="btn btn-primary">Publish</button>
+      </form>
     </div>
     {{end}}
 
@@ -228,6 +251,24 @@
         if (next) window.location = next.href;
       }
     }
+  });
+})();
+
+// Copy-to-clipboard for share links.
+(function () {
+  document.querySelectorAll('.copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const text = btn.getAttribute('data-copy');
+      navigator.clipboard.writeText(text).then(function () {
+        btn.classList.add('copied');
+        const original = btn.getAttribute('title');
+        btn.setAttribute('title', 'Copied!');
+        setTimeout(function () {
+          btn.classList.remove('copied');
+          btn.setAttribute('title', original);
+        }, 1500);
+      });
+    });
   });
 })();
 </script>
