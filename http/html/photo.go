@@ -196,20 +196,28 @@ func (s *Server) handlePhotoDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	isOwner := authed && p.UserID == userID
+
 	s.render(w, r, "detail.html", struct {
 		baseData
-		Photo        *photo.Photo
-		PrevURL      string
-		NextURL      string
-		BackURL      string
-		UploaderName string
+		Photo          *photo.Photo
+		PrevURL        string
+		NextURL        string
+		BackURL        string
+		UploaderName   string
+		PhotoPublicURL string
+		IsOwner        bool
+		CurrentURL     string
 	}{
-		baseData:     s.newBase(r, "detail"),
-		Photo:        p,
-		PrevURL:      prevURL,
-		NextURL:      nextURL,
-		BackURL:      backURL,
-		UploaderName: uploaderName,
+		baseData:       s.newBase(r, "detail"),
+		Photo:          p,
+		PrevURL:        prevURL,
+		NextURL:        nextURL,
+		BackURL:        backURL,
+		UploaderName:   uploaderName,
+		PhotoPublicURL: s.publicURL(r) + "/p/" + p.ID.String(),
+		IsOwner:        isOwner,
+		CurrentURL:     r.URL.RequestURI(),
 	})
 }
 
@@ -610,4 +618,57 @@ func (s *Server) handleUploadPost(w http.ResponseWriter, r *http.Request) {
 		baseData: s.newBase(r, "upload"),
 		Success:  fmt.Sprintf("Uploaded %s.", safeFilename),
 	})
+}
+
+// handleSetPublished toggles a photo's published state from the detail page.
+// Owner only — verifies the authenticated user owns the photo before updating.
+//
+//	POST /photo/{id}/publish
+//
+// Redirects back to the photo detail page (preserving any ctx query params
+// via the Referer-independent approach of reading "next" from the form, or
+// falling back to the plain detail URL).
+func (s *Server) handleSetPublished(w http.ResponseWriter, r *http.Request) {
+	userID, _ := s.authenticatedUserID(r) // guaranteed by requireAuth
+
+	raw := r.PathValue("id")
+	id, err := kid.FromString(raw)
+	if err != nil {
+		s.renderNotFound(w, r)
+		return
+	}
+
+	p, err := s.PhotoService.FindPhotoByID(r.Context(), id)
+	if err != nil {
+		if photo.ErrorCode(err) == photo.ENOTFOUND {
+			s.renderNotFound(w, r)
+		} else {
+			s.renderServerError(w, r, err)
+		}
+		return
+	}
+	if p.UserID != userID {
+		s.renderNotFound(w, r) // don't reveal existence of other users' photos
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	published := r.FormValue("published") == "true"
+	if _, err := s.PhotoService.UpdatePhoto(r.Context(), id, photo.PhotoUpdate{
+		Published: &published,
+	}); err != nil {
+		s.renderServerError(w, r, err)
+		return
+	}
+
+	// Redirect back to the detail page, preserving navigation context.
+	dest := "/photo/" + raw
+	if next := r.FormValue("next"); next != "" {
+		dest = next
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
 }

@@ -153,6 +153,24 @@ func isSecureRequest(r *http.Request, trustedProxy string) bool {
 	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
+// publicURL returns the externally-visible base URL for this request
+// (scheme + host, no trailing slash), used to build absolute share links.
+//
+// If PublicBaseURL is configured, it's used directly — this is the most
+// reliable source since it's explicitly set by the admin and doesn't depend
+// on proxy headers. Otherwise, falls back to deriving scheme://host from the
+// request itself.
+func (s *Server) publicURL(r *http.Request) string {
+	if s.PublicBaseURL != "" {
+		return strings.TrimSuffix(s.PublicBaseURL, "/")
+	}
+	scheme := "http"
+	if isSecureRequest(r, s.TrustedProxy) {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
 // RegisterRoutes registers all HTML UI routes on mux.
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// Static assets.
@@ -162,6 +180,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /p/{id}", s.handlePublicPhoto)
 	mux.HandleFunc("GET /p/{id}/thumb", s.handlePublicThumb)
 	mux.HandleFunc("GET /photo/{id}", s.handlePhotoDetail)
+	mux.HandleFunc("POST /photo/{id}/publish", s.requireAuth(s.handleSetPublished))
 	mux.HandleFunc("GET /photo/{id}/file", s.handlePrivatePhotoFile)
 	mux.HandleFunc("GET /photo/{id}/thumb", s.handlePrivateThumb)
 	mux.HandleFunc("GET /photo/{id}/preview", s.handlePrivatePreview)
