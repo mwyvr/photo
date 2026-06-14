@@ -20,6 +20,7 @@ func makePhoto(t *testing.T, svc *sqlite.PhotoService, userID kid.ID, filename, 
 		MIMEType:      "image/jpeg",
 		FileType:      "JPEG",
 		FileSizeBytes: 1024,
+		Visibility:    photo.VisibilityHousehold,
 	}
 	if err := svc.CreatePhoto(context.Background(), p); err != nil {
 		t.Fatalf("create photo %q: %v", filename, err)
@@ -172,12 +173,12 @@ func TestPhotoService_UpdatePhoto(t *testing.T) {
 
 	desc := "A lovely sunset"
 	loc := "Tokyo, Japan"
-	pub := true
+	vis := photo.VisibilityPublished
 
 	updated, err := photoSvc.UpdatePhoto(ctx, p.ID, photo.PhotoUpdate{
 		Description:  &desc,
 		LocationName: &loc,
-		Published:    &pub,
+		Visibility:   &vis,
 	})
 	if err != nil {
 		t.Fatalf("update photo: %v", err)
@@ -188,8 +189,8 @@ func TestPhotoService_UpdatePhoto(t *testing.T) {
 	if updated.LocationName != loc {
 		t.Errorf("location = %q, want %q", updated.LocationName, loc)
 	}
-	if !updated.Published {
-		t.Error("expected Published = true")
+	if updated.Visibility != photo.VisibilityPublished {
+		t.Errorf("visibility = %q, want %q", updated.Visibility, photo.VisibilityPublished)
 	}
 }
 
@@ -222,7 +223,7 @@ func TestPhotoService_NotFound(t *testing.T) {
 	}
 }
 
-func TestPhotoService_FindPhotos_IncludeOthersPublished(t *testing.T) {
+func TestPhotoService_FindPhotos_HouseholdVisibility(t *testing.T) {
 	db := newTestDB(t)
 	userSvc := sqlite.NewUserService(db)
 	photoSvc := sqlite.NewPhotoService(db)
@@ -231,58 +232,81 @@ func TestPhotoService_FindPhotos_IncludeOthersPublished(t *testing.T) {
 	alice := makeUser(t, userSvc, "alice", "alice@example.com")
 	bob := makeUser(t, userSvc, "bob", "bob@example.com")
 
-	aliceUnpub := makePhoto(t, photoSvc, alice.ID, "alice-private.jpg", "hash-a1")
-	aliceA2 := makePhoto(t, photoSvc, alice.ID, "alice-public.jpg", "hash-a2")
-	bobPriv := makePhoto(t, photoSvc, bob.ID, "bob-private.jpg", "hash-b1")
-	bobPub := makePhoto(t, photoSvc, bob.ID, "bob-public.jpg", "hash-b2")
+	priv := photo.VisibilityPrivate
+	hh := photo.VisibilityHousehold
 
-	// Publish alice's second photo and bob's second photo.
-	pub := true
-	if _, err := photoSvc.UpdatePhoto(ctx, aliceA2.ID, photo.PhotoUpdate{Published: &pub}); err != nil {
-		t.Fatalf("publish alice photo: %v", err)
-	}
-	if _, err := photoSvc.UpdatePhoto(ctx, bobPub.ID, photo.PhotoUpdate{Published: &pub}); err != nil {
-		t.Fatalf("publish bob photo: %v", err)
+	// Alice's private photo — only she should see it.
+	alicePrivate := makePhoto(t, photoSvc, alice.ID, "alice-private.jpg", "hash-a1")
+	if _, err := photoSvc.UpdatePhoto(ctx, alicePrivate.ID, photo.PhotoUpdate{Visibility: &priv}); err != nil {
+		t.Fatalf("set private: %v", err)
 	}
 
-	// Without IncludeOthersPublished: alice sees only her own 2 photos.
+	// Alice's household photo — any authenticated user should see it.
+	aliceHousehold := makePhoto(t, photoSvc, alice.ID, "alice-household.jpg", "hash-a2")
+	if _, err := photoSvc.UpdatePhoto(ctx, aliceHousehold.ID, photo.PhotoUpdate{Visibility: &hh}); err != nil {
+		t.Fatalf("set household: %v", err)
+	}
+
+	// Bob's private photo — only he should see it.
+	bobPrivate := makePhoto(t, photoSvc, bob.ID, "bob-private.jpg", "hash-b1")
+	if _, err := photoSvc.UpdatePhoto(ctx, bobPrivate.ID, photo.PhotoUpdate{Visibility: &priv}); err != nil {
+		t.Fatalf("set private: %v", err)
+	}
+
+	// Bob's household photo — any authenticated user should see it.
+	bobHousehold := makePhoto(t, photoSvc, bob.ID, "bob-household.jpg", "hash-b2")
+	if _, err := photoSvc.UpdatePhoto(ctx, bobHousehold.ID, photo.PhotoUpdate{Visibility: &hh}); err != nil {
+		t.Fatalf("set household: %v", err)
+	}
+
+	// 1. Alice's own view (no ViewerID) — sees only her own photos.
 	photos, total, err := photoSvc.FindPhotos(ctx, photo.PhotoFilter{UserID: alice.ID})
 	if err != nil {
-		t.Fatalf("find photos (mine): %v", err)
+		t.Fatalf("find photos (own): %v", err)
 	}
 	if total != 2 {
-		t.Errorf("mine: total = %d, want 2", total)
+		t.Errorf("own: total = %d, want 2", total)
 	}
 
-	// With IncludeOthersPublished: alice sees her own 2 + bob's 1 published = 3.
-	// bob's private photo (bobPriv) should not appear.
+	// 2. Alice as viewer in household mode — sees her own (private+household) + bob's household.
 	photos, total, err = photoSvc.FindPhotos(ctx, photo.PhotoFilter{
-		UserID:                 alice.ID,
-		IncludeOthersPublished: true,
+		UserID:        alice.ID,
+		ViewerID:      alice.ID,
+		HouseholdMode: true,
 	})
 	if err != nil {
-		t.Fatalf("find photos (all published): %v", err)
+		t.Fatalf("find photos (household): %v", err)
 	}
 	if total != 3 {
-		t.Errorf("all published: total = %d, want 3", total)
+		t.Errorf("household: total = %d, want 3 (alice×2 + bob's household)", total)
 	}
-
 	ids := make(map[kid.ID]bool)
 	for _, p := range photos {
 		ids[p.ID] = true
 	}
-	if !ids[aliceUnpub.ID] {
-		t.Error("expected alice's unpublished photo to be included (own photo)")
+	if !ids[alicePrivate.ID] {
+		t.Error("expected alice's private photo (own) to be included")
 	}
-	if !ids[aliceA2.ID] {
-		t.Error("expected alice's published photo to be included")
+	if !ids[aliceHousehold.ID] {
+		t.Error("expected alice's household photo to be included")
 	}
-	if !ids[bobPub.ID] {
-		t.Error("expected bob's published photo to be included")
+	if !ids[bobHousehold.ID] {
+		t.Error("expected bob's household photo to be included")
 	}
-	if ids[bobPriv.ID] {
+	if ids[bobPrivate.ID] {
 		t.Error("did not expect bob's private photo to be included")
 	}
+
+	// 3. Unauthenticated (no UserID, no ViewerID) — only published photos.
+	photos, total, err = photoSvc.FindPhotos(ctx, photo.PhotoFilter{})
+	if err != nil {
+		t.Fatalf("find photos (unauthed): %v", err)
+	}
+	if total != 0 {
+		t.Errorf("unauthed: total = %d, want 0 (no published photos)", total)
+	}
+	_ = photos
+	_ = bobPrivate
 }
 
 // makePhotoWithGPS creates a photo with GPS coordinates set.
@@ -296,6 +320,7 @@ func makePhotoWithGPS(t *testing.T, svc *sqlite.PhotoService, userID kid.ID, fil
 		MIMEType:      "image/jpeg",
 		FileType:      "JPEG",
 		FileSizeBytes: 1024,
+		Visibility:    photo.VisibilityHousehold,
 		GPSLat:        &lat,
 		GPSLon:        &lon,
 	}

@@ -59,6 +59,10 @@ type Server struct {
 	// RAW files are always unpublished regardless of this setting.
 	PublishDefault bool
 
+	// HouseholdMode makes household-visibility photos visible to all
+	// authenticated users. Mirrors the config field of the same name.
+	HouseholdMode bool
+
 	// TrustedProxy is the IP of the reverse proxy. When set, X-Forwarded-For
 	// is only trusted when the direct connection comes from this address.
 	TrustedProxy string
@@ -112,6 +116,8 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("DELETE /api/v1/photos/{id}", s.requireAuth(s.handleDeletePhoto))
 	s.router.HandleFunc("POST /api/v1/photos/{id}/regeocode", s.requireAuth(s.handleRegeocode))
 	s.router.HandleFunc("POST /api/v1/photos/regeocode-missing", s.requireAuth(s.handleRegeocodeMissing))
+	s.router.HandleFunc("POST /api/v1/photos/{id}/share", s.requireAuth(s.handleGeneratePhotoShareToken))
+	s.router.HandleFunc("DELETE /api/v1/photos/{id}/share", s.requireAuth(s.handleRevokePhotoShareToken))
 
 	s.router.HandleFunc("POST /api/v1/photos/{id}/tags/{name}", s.requireAuth(s.handleAttachTag))
 	s.router.HandleFunc("DELETE /api/v1/photos/{id}/tags/{name}", s.requireAuth(s.handleDetachTag))

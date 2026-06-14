@@ -140,7 +140,7 @@ Flags:
 			continue
 		}
 
-		ph, err := c.uploadPhotoOpts(ctx, p, false, true, tags)
+		ph, err := c.uploadPhotoOpts(ctx, p, false, "published", tags)
 		if err != nil {
 			if isAlreadyExists(err) {
 				fmt.Printf("  skip     %-40s already in library\n", base)
@@ -153,8 +153,7 @@ Flags:
 			continue
 		}
 
-		// Warn if a RAW file ended up in the publish directory — the server
-		// will have overridden published=true to false for it.
+		// Warn if a RAW file ended up in the publish directory.
 		if ph.IsRaw {
 			fmt.Fprintf(os.Stderr, "  warn     %-40s RAW file — not published (use 'photo add' for RAW)\n", base)
 			skipped++

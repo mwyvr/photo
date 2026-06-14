@@ -13,15 +13,17 @@ import (
 // Album is a named, ordered collection of photos.
 // Photos may belong to multiple albums; each album maintains its own ordering.
 type Album struct {
-	ID           kid.ID  `json:"id"`
-	UserID       kid.ID  `json:"userId"`
-	Name         string  `json:"name"`
-	Slug         string  `json:"slug"`
-	Description  string  `json:"description"`
-	CoverPhotoID *kid.ID `json:"coverPhotoId,omitempty"`
-	PhotoCount   int     `json:"photoCount"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID           kid.ID     `json:"id"`
+	UserID       kid.ID     `json:"userId"`
+	Name         string     `json:"name"`
+	Slug         string     `json:"slug"`
+	Description  string     `json:"description"`
+	CoverPhotoID *kid.ID    `json:"coverPhotoId,omitempty"`
+	PhotoCount   int        `json:"photoCount"`
+	Visibility   Visibility `json:"visibility"`
+	ShareToken   *string    `json:"shareToken,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
 }
 
 // Validate returns an error if required fields are missing.
@@ -79,9 +81,11 @@ type AlbumPhoto struct {
 
 // AlbumFilter is passed to FindAlbums.
 type AlbumFilter struct {
-	UserID kid.ID
-	Offset int
-	Limit  int
+	UserID        kid.ID
+	ViewerID      kid.ID
+	HouseholdMode bool
+	Offset        int
+	Limit         int
 }
 
 // AlbumUpdate carries mutable fields on an album.
@@ -89,6 +93,8 @@ type AlbumUpdate struct {
 	Name         *string
 	Description  *string
 	CoverPhotoID *kid.ID
+	Visibility   *Visibility
+	ShareToken   *string // set to "" to clear/revoke
 }
 
 // AlbumService manages albums and their photo memberships.
@@ -100,6 +106,10 @@ type AlbumService interface {
 	// Returns ENOTFOUND if the slug does not exist.
 	FindAlbumBySlug(ctx context.Context, slug string) (*Album, error)
 
+	// FindAlbumByShareToken retrieves an album by its share token.
+	// Returns ENOTFOUND if no album has that token.
+	FindAlbumByShareToken(ctx context.Context, token string) (*Album, error)
+
 	// FindAlbums retrieves albums matching the filter.
 	FindAlbums(ctx context.Context, filter AlbumFilter) ([]*Album, int, error)
 
@@ -109,6 +119,9 @@ type AlbumService interface {
 
 	// UpdateAlbum updates mutable fields on an album.
 	UpdateAlbum(ctx context.Context, id kid.ID, upd AlbumUpdate) (*Album, error)
+
+	// GenerateShareToken creates or replaces the share token on an album.
+	GenerateShareToken(ctx context.Context, id kid.ID) (string, error)
 
 	// DeleteAlbum removes an album and all its photo memberships.
 	DeleteAlbum(ctx context.Context, id kid.ID) error

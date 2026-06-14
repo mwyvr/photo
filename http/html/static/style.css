@@ -218,6 +218,60 @@ main {
 
 /* --- Search form ------------------------------------------- */
 
+/* --- Visibility selector ------------------------------------ */
+
+.visibility-selector {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.visibility-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--clr-surface);
+  transition: border-color 0.15s, background 0.15s;
+  min-width: 72px;
+}
+
+.visibility-option input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.visibility-option.selected,
+.visibility-option:has(input:checked) {
+  border-color: var(--clr-accent);
+  background: color-mix(in srgb, var(--clr-accent) 10%, transparent);
+}
+
+.visibility-option:hover {
+  border-color: var(--clr-text-muted);
+}
+
+.vis-icon {
+  font-size: 1.2em;
+}
+
+.vis-label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--clr-text);
+}
+
+.vis-desc {
+  font-size: 0.7rem;
+  color: var(--clr-text-muted);
+}
+
 /* --- Scope toggle -------------------------------------------- */
 
 .scope-toggle {
@@ -707,6 +761,12 @@ input::placeholder {
 .album-card-count {
   font-size: var(--fs-sm);
   color: var(--clr-text-muted);
+}
+
+.album-card-vis {
+  font-size: var(--fs-sm);
+  line-height: 1;
+  opacity: 0.7;
 }
 
 /* --- Login page -------------------------------------------- */

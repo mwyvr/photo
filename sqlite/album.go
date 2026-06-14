@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -15,9 +17,7 @@ type AlbumService struct{ db *DB }
 
 func NewAlbumService(db *DB) *AlbumService { return &AlbumService{db: db} }
 
-// MigrateExistingSlugs populates slug for any albums that have an empty slug
-// (i.e. albums created before 0006_album_slugs.sql was applied).
-// Called once at server startup after migrations.
+// MigrateExistingSlugs populates slug for any albums that have an empty slug.
 func (s *AlbumService) MigrateExistingSlugs(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -31,10 +31,7 @@ func (s *AlbumService) MigrateExistingSlugs(ctx context.Context) error {
 	}
 	defer rows.Close()
 
-	type row struct {
-		id   string
-		name string
-	}
+	type row struct{ id, name string }
 	var needSlug []row
 	for rows.Next() {
 		var r row
@@ -74,6 +71,7 @@ func (s *AlbumService) FindAlbumBySlug(ctx context.Context, slug string) (*photo
 	row := tx.QueryRowContext(ctx, `
 		SELECT a.id, a.user_id, a.name, a.slug, a.description, a.cover_photo_id,
 		       COUNT(ap.photo_id) AS photo_count,
+		       a.visibility, a.share_token,
 		       a.created_at, a.updated_at
 		FROM albums a
 		LEFT JOIN album_photos ap ON ap.album_id = a.id
@@ -87,6 +85,29 @@ func (s *AlbumService) FindAlbumBySlug(ctx context.Context, slug string) (*photo
 	return a, err
 }
 
+func (s *AlbumService) FindAlbumByShareToken(ctx context.Context, token string) (*photo.Album, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	row := tx.QueryRowContext(ctx, `
+		SELECT a.id, a.user_id, a.name, a.slug, a.description, a.cover_photo_id,
+		       COUNT(ap.photo_id) AS photo_count,
+		       a.visibility, a.share_token,
+		       a.created_at, a.updated_at
+		FROM albums a
+		LEFT JOIN album_photos ap ON ap.album_id = a.id
+		WHERE a.share_token = ?
+		GROUP BY a.id
+	`, token)
+	a, err := scanAlbum(row)
+	if err == sql.ErrNoRows {
+		return nil, photo.Errorf(photo.ENOTFOUND, "album not found")
+	}
+	return a, err
+}
+
 func (s *AlbumService) FindAlbums(ctx context.Context, filter photo.AlbumFilter) ([]*photo.Album, int, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -94,14 +115,34 @@ func (s *AlbumService) FindAlbums(ctx context.Context, filter photo.AlbumFilter)
 	}
 	defer tx.Rollback()
 
-	where := []string{"1 = 1"}
+	where := []string{}
 	args := []interface{}{}
 
 	if !filter.UserID.IsNil() {
-		where = append(where, "a.user_id = ?")
-		args = append(args, filter.UserID)
+		if !filter.ViewerID.IsNil() && filter.HouseholdMode {
+			where = append(where, "(a.user_id = ? OR a.visibility IN ('household', 'published'))")
+			args = append(args, filter.UserID)
+		} else if !filter.ViewerID.IsNil() {
+			where = append(where, "(a.user_id = ? OR a.visibility = 'published')")
+			args = append(args, filter.UserID)
+		} else {
+			where = append(where, "a.user_id = ?")
+			args = append(args, filter.UserID)
+		}
+	} else if !filter.ViewerID.IsNil() {
+		if filter.HouseholdMode {
+			where = append(where, "a.visibility IN ('household', 'published')")
+		} else {
+			where = append(where, "a.visibility = 'published'")
+		}
+	} else {
+		where = append(where, "a.visibility = 'published'")
 	}
-	clause := strings.Join(where, " AND ")
+
+	clause := "1 = 1"
+	if len(where) > 0 {
+		clause = strings.Join(where, " AND ")
+	}
 
 	var n int
 	if err := tx.QueryRowContext(ctx,
@@ -113,6 +154,7 @@ func (s *AlbumService) FindAlbums(ctx context.Context, filter photo.AlbumFilter)
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT a.id, a.user_id, a.name, a.slug, a.description, a.cover_photo_id,
 		       COUNT(ap.photo_id) AS photo_count,
+		       a.visibility, a.share_token,
 		       a.created_at, a.updated_at
 		FROM albums a
 		LEFT JOIN album_photos ap ON ap.album_id = a.id
@@ -138,9 +180,11 @@ func (s *AlbumService) FindAlbums(ctx context.Context, filter photo.AlbumFilter)
 }
 
 func (s *AlbumService) CreateAlbum(ctx context.Context, a *photo.Album) error {
-	// Derive slug from name before validation.
 	if a.Slug == "" && a.Name != "" {
 		a.Slug = photo.Slugify(a.Name)
+	}
+	if a.Visibility == "" {
+		a.Visibility = photo.VisibilityHousehold
 	}
 	if err := a.Validate(); err != nil {
 		return err
@@ -151,17 +195,16 @@ func (s *AlbumService) CreateAlbum(ctx context.Context, a *photo.Album) error {
 	}
 	defer tx.Rollback()
 
-	// Ensure slug uniqueness — append -2, -3 etc if needed.
 	a.Slug = s.uniqueSlug(ctx, tx, a.Slug, "")
-
 	a.ID = kid.New()
 	a.CreatedAt = tx.now
 	a.UpdatedAt = tx.now
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO albums (id, user_id, name, slug, description, cover_photo_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO albums (id, user_id, name, slug, description, cover_photo_id, visibility, share_token, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.UserID, a.Name, a.Slug, a.Description, nullKidID(a.CoverPhotoID),
+		string(a.Visibility), a.ShareToken,
 		tx.nowStr(), tx.nowStr(),
 	)
 	if err != nil {
@@ -170,8 +213,6 @@ func (s *AlbumService) CreateAlbum(ctx context.Context, a *photo.Album) error {
 	return tx.Commit()
 }
 
-// uniqueSlug ensures slug is not already in use, appending -2, -3 etc if needed.
-// excludeID skips the check for a specific album (used during update, unused here).
 func (s *AlbumService) uniqueSlug(ctx context.Context, tx *Tx, base, excludeID string) string {
 	slug := base
 	for i := 2; ; i++ {
@@ -203,7 +244,6 @@ func (s *AlbumService) UpdateAlbum(ctx context.Context, id kid.ID, upd photo.Alb
 	}
 	if v := upd.Name; v != nil {
 		a.Name = *v
-		// Slug is immutable — name changes do not update the slug.
 	}
 	if v := upd.Description; v != nil {
 		a.Description = *v
@@ -215,16 +255,42 @@ func (s *AlbumService) UpdateAlbum(ctx context.Context, id kid.ID, upd photo.Alb
 			a.CoverPhotoID = upd.CoverPhotoID
 		}
 	}
+	if v := upd.Visibility; v != nil {
+		a.Visibility = *v
+	}
+	if upd.ShareToken != nil {
+		if *upd.ShareToken == "" {
+			a.ShareToken = nil
+		} else {
+			t := *upd.ShareToken
+			a.ShareToken = &t
+		}
+	}
 
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE albums SET name = ?, description = ?, cover_photo_id = ?, updated_at = ?
+		UPDATE albums SET name = ?, description = ?, cover_photo_id = ?,
+		visibility = ?, share_token = ?, updated_at = ?
 		WHERE id = ?`,
-		a.Name, a.Description, nullKidID(a.CoverPhotoID), tx.nowStr(), id,
+		a.Name, a.Description, nullKidID(a.CoverPhotoID),
+		string(a.Visibility), a.ShareToken, tx.nowStr(), id,
 	); err != nil {
 		return nil, fmt.Errorf("update album: %w", err)
 	}
 	a.UpdatedAt = tx.now
 	return a, tx.Commit()
+}
+
+// GenerateShareToken generates a random token for album link-sharing.
+func (s *AlbumService) GenerateShareToken(ctx context.Context, id kid.ID) (string, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate share token: %w", err)
+	}
+	token := hex.EncodeToString(b)
+	if _, err := s.UpdateAlbum(ctx, id, photo.AlbumUpdate{ShareToken: &token}); err != nil {
+		return "", err
+	}
+	return token, nil
 }
 
 func (s *AlbumService) DeleteAlbum(ctx context.Context, id kid.ID) error {
@@ -233,7 +299,6 @@ func (s *AlbumService) DeleteAlbum(ctx context.Context, id kid.ID) error {
 		return err
 	}
 	defer tx.Rollback()
-
 	result, err := tx.ExecContext(ctx, `DELETE FROM albums WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete album: %w", err)
@@ -251,19 +316,16 @@ func (s *AlbumService) AddPhoto(ctx context.Context, albumID, photoID kid.ID) er
 		return err
 	}
 	defer tx.Rollback()
-
 	if _, err := findAlbumByID(ctx, tx, albumID); err != nil {
 		return err
 	}
 	if _, err := findPhotoByID(ctx, tx, photoID); err != nil {
 		return err
 	}
-
 	var maxPos int
 	tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(position), 0) FROM album_photos WHERE album_id = ?`, albumID,
 	).Scan(&maxPos) //nolint
-
 	_, err = tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO album_photos (album_id, photo_id, position) VALUES (?, ?, ?)`,
 		albumID, photoID, maxPos+1,
@@ -280,7 +342,6 @@ func (s *AlbumService) RemovePhoto(ctx context.Context, albumID, photoID kid.ID)
 		return err
 	}
 	defer tx.Rollback()
-
 	result, err := tx.ExecContext(ctx,
 		`DELETE FROM album_photos WHERE album_id = ? AND photo_id = ?`, albumID, photoID,
 	)
@@ -322,14 +383,12 @@ func (s *AlbumService) MovePhoto(ctx context.Context, albumID, photoID, afterPho
 	); err != nil {
 		return fmt.Errorf("shift positions: %w", err)
 	}
-
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE album_photos SET position = ?
 		WHERE album_id = ? AND photo_id = ?`, newPos+1, albumID, photoID,
 	); err != nil {
 		return fmt.Errorf("set new position: %w", err)
 	}
-
 	return tx.Commit()
 }
 
@@ -380,6 +439,7 @@ func findAlbumByID(ctx context.Context, tx *Tx, id kid.ID) (*photo.Album, error)
 	row := tx.QueryRowContext(ctx, `
 		SELECT a.id, a.user_id, a.name, a.slug, a.description, a.cover_photo_id,
 		       COUNT(ap.photo_id) AS photo_count,
+		       a.visibility, a.share_token,
 		       a.created_at, a.updated_at
 		FROM albums a
 		LEFT JOIN album_photos ap ON ap.album_id = a.id
@@ -400,11 +460,14 @@ type albumScanner interface {
 func scanAlbum(s albumScanner) (*photo.Album, error) {
 	var a photo.Album
 	var coverPhotoID sql.NullString
+	var visibility string
+	var shareToken sql.NullString
 	var createdAt, updatedAt NullTime
 
 	err := s.Scan(
 		&a.ID, &a.UserID, &a.Name, &a.Slug, &a.Description, &coverPhotoID,
 		&a.PhotoCount,
+		&visibility, &shareToken,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -416,12 +479,15 @@ func scanAlbum(s albumScanner) (*photo.Album, error) {
 			a.CoverPhotoID = &id
 		}
 	}
+	a.Visibility = photo.Visibility(visibility)
+	if shareToken.Valid {
+		a.ShareToken = &shareToken.String
+	}
 	a.CreatedAt = createdAt.Time()
 	a.UpdatedAt = updatedAt.Time()
 	return &a, nil
 }
 
-// nullKidID returns nil if the kid.ID pointer is nil or zero, else the string value.
 func nullKidID(id *kid.ID) interface{} {
 	if id == nil || id.IsNil() {
 		return nil
@@ -435,5 +501,5 @@ const photoSelectColsAliased = `p.id, p.user_id, p.filename, p.stored_path, p.sh
 	       p.aperture, p.shutter_speed, p.iso, p.gps_lat, p.gps_lon,
 	       p.captured_at, p.location_name, p.exif_raw, p.description,
 	       p.is_raw, p.raw_partner_id, p.file_type,
-	       p.published, p.thumb_path,
+	       p.visibility, p.share_token, p.thumb_path,
 	       p.created_at, p.updated_at`

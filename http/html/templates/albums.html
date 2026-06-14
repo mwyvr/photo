@@ -23,6 +23,9 @@
     <div class="album-card-body">
       <span class="album-card-name">{{.Name}}</span>
       <span class="album-card-count">{{.PhotoCount}} photo{{if ne .PhotoCount 1}}s{{end}}</span>
+      {{if $.Authenticated}}
+      <span class="album-card-vis">{{if eq (visStr .Visibility) "private"}}🔒{{else if eq (visStr .Visibility) "household"}}👥{{else}}🌐{{end}}</span>
+      {{end}}
     </div>
   </a>
   {{end}}

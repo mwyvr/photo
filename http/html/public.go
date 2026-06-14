@@ -188,23 +188,39 @@ func (s *Server) handlePrivatePhotoFile(w http.ResponseWriter, r *http.Request) 
 }
 
 // handlePublicPhoto serves a browser-displayable version of a published photo.
-// For RAW files: extracts the embedded JPEG preview via exiftool.
-// For JPEG/PNG/HEIC: serves the file directly.
 func (s *Server) handlePublicPhoto(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.resolvePublicPhoto(w, r)
 	if !ok {
 		return
 	}
+	s.servePhotoFile(w, r, p)
+}
 
+// handlePublicThumb serves (or generates and caches) a thumbnail for a published photo.
+func (s *Server) handlePublicThumb(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.resolvePublicPhoto(w, r)
+	if !ok {
+		return
+	}
+	s.servePhotoThumb(w, r, p)
+}
+
+// servePhotoFile serves the displayable image for a photo — used by both
+// the published (/p/{id}) and share-token (/s/{token}) paths.
+// For RAW files: extracts the embedded JPEG preview via exiftool.
+// For JPEG/PNG/HEIC: serves the file directly.
+func (s *Server) servePhotoFile(w http.ResponseWriter, r *http.Request, p *photo.Photo) {
 	srcPath, err := safeFilePath(s.LibraryRoot, p.StoredPath)
 	if err != nil {
-		log.Printf("public photo: %v", err)
+		log.Printf("serve photo: %v", err)
 		http.NotFound(w, r)
 		return
 	}
 
+	public := p.Visibility == photo.VisibilityPublished
+
 	if !p.IsRaw {
-		cacheImmutable(w, true)
+		cacheImmutable(w, public)
 		http.ServeFile(w, r, srcPath)
 		return
 	}
@@ -226,32 +242,27 @@ func (s *Server) handlePublicPhoto(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, srcPath)
 }
 
-// handlePublicThumb serves (or generates and caches) a thumbnail.
-func (s *Server) handlePublicThumb(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.resolvePublicPhoto(w, r)
-	if !ok {
-		return
-	}
+// servePhotoThumb serves (or generates and caches) a thumbnail.
+// Used by both the published (/p/{id}/thumb) and share-token (/s/{token}/thumb) paths.
+func (s *Server) servePhotoThumb(w http.ResponseWriter, r *http.Request, p *photo.Photo) {
+	public := p.Visibility == photo.VisibilityPublished
 
-	// Serve cached thumbnail if the DB knows about it.
 	if p.ThumbPath != nil && *p.ThumbPath != "" {
 		thumbFull := filepath.Join(s.LibraryRoot, *p.ThumbPath)
 		if _, err := os.Stat(thumbFull); err == nil {
-			serveImmutable(w, r, thumbFull, p.Published)
+			serveImmutable(w, r, thumbFull, public)
 			return
 		}
 	}
 
-	// Check if file already exists on disk (previous save path write may have failed).
 	expectedThumb := filepath.Join(s.LibraryRoot, ".photo", "thumbs", p.ID.String()+".jpg")
 	if _, err := os.Stat(expectedThumb); err == nil {
 		rel, _ := filepath.Rel(s.LibraryRoot, expectedThumb)
 		s.PhotoService.UpdatePhoto(r.Context(), p.ID, photo.PhotoUpdate{ThumbPath: &rel}) //nolint
-		serveImmutable(w, r, expectedThumb, p.Published)
+		serveImmutable(w, r, expectedThumb, public)
 		return
 	}
 
-	// Generate thumbnail on first request.
 	thumbPath, generated, err := s.generateThumb(p)
 	if err != nil {
 		log.Printf("thumb %s: generation failed: %v — serving full image", p.ID, err)
@@ -268,7 +279,7 @@ func (s *Server) handlePublicThumb(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	serveImmutable(w, r, thumbPath, p.Published)
+	serveImmutable(w, r, thumbPath, public)
 }
 
 // resolvePublicPhoto looks up the photo by ID and enforces visibility.
@@ -286,8 +297,8 @@ func (s *Server) resolvePublicPhoto(w http.ResponseWriter, r *http.Request) (*ph
 		http.NotFound(w, r)
 		return nil, false
 	}
-	_, authed := s.authenticatedUserID(r)
-	if !p.Published && !authed {
+	// /p/{id} is a public URL — only serve published photos without auth.
+	if p.Visibility != photo.VisibilityPublished {
 		http.NotFound(w, r)
 		return nil, false
 	}
@@ -429,4 +440,37 @@ func resizeJPEGBytes(imgData []byte, maxDim int) ([]byte, error) {
 // isJPEG checks that data begins with the JPEG magic bytes FF D8.
 func isJPEG(data []byte) bool {
 	return len(data) >= 2 && data[0] == 0xFF && data[1] == 0xD8
+}
+
+// handleSharedPhotoOrThumb serves a photo (or its thumbnail) via share token.
+// Use ?thumb=1 for the thumbnail variant.
+//
+//	GET /s/{token}
+//	GET /s/{token}?thumb=1
+func (s *Server) handleSharedPhotoOrThumb(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	p, err := s.PhotoService.FindPhotoByShareToken(r.Context(), token)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if r.URL.Query().Get("thumb") == "1" {
+		s.servePhotoThumb(w, r, p)
+	} else {
+		s.servePhotoFile(w, r, p)
+	}
+}
+
+// handleSharedAlbum serves an album via its share token.
+//
+//	GET /sa/{token}
+func (s *Server) handleSharedAlbum(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	album, err := s.AlbumService.FindAlbumByShareToken(r.Context(), token)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	r.SetPathValue("id", album.Slug)
+	s.handleAlbumDetail(w, r)
 }

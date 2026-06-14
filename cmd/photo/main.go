@@ -81,6 +81,8 @@ func run(ctx context.Context, args []string) error {
 		cmdErr = runDelete(ctx, client, rest)
 	case "update":
 		cmdErr = runUpdate(ctx, client, rest)
+	case "share":
+		cmdErr = runShare(ctx, client, rest)
 	case "regeocode":
 		cmdErr = runRegeocode(ctx, client, rest)
 	case "album":

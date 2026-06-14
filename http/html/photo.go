@@ -16,6 +16,22 @@ import (
 
 const pageSize = 48
 
+// shareURL returns the /s/{token} URL if the photo has a share token, else "".
+func shareURL(base string, p *photo.Photo) string {
+	if p.ShareToken == nil || *p.ShareToken == "" {
+		return ""
+	}
+	return base + "/s/" + *p.ShareToken
+}
+
+// shareThumbURL returns the thumbnail URL for a share token.
+func shareThumbURL(base string, p *photo.Photo) string {
+	if p.ShareToken == nil || *p.ShareToken == "" {
+		return ""
+	}
+	return base + "/s/" + *p.ShareToken + "?thumb=1"
+}
+
 func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		s.renderNotFound(w, r)
@@ -27,16 +43,13 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(q.Get("offset"))
 
 	filter := photo.PhotoFilter{
-		Limit:  pageSize,
-		Offset: offset,
+		Limit:         pageSize,
+		Offset:        offset,
+		HouseholdMode: s.HouseholdMode,
 	}
-	scopeAll := q.Get("scope") == "all"
 	if authed {
 		filter.UserID = userID
-		filter.IncludeOthersPublished = scopeAll
-	} else {
-		t := true
-		filter.Published = &t
+		filter.ViewerID = userID
 	}
 
 	if v := q.Get("location"); v != "" {
@@ -68,7 +81,6 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 		Tag      string
 		After    string
 		Before   string
-		Scope    string
 		Active   bool
 	}
 	qs := queryState{
@@ -76,7 +88,6 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 		Tag:      q.Get("tag"),
 		After:    q.Get("after"),
 		Before:   q.Get("before"),
-		Scope:    q.Get("scope"),
 	}
 	qs.Active = qs.Location != "" || qs.Tag != "" || qs.After != "" || qs.Before != ""
 
@@ -95,33 +106,10 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 	if qs.Before != "" {
 		ctxParams.Set("before", qs.Before)
 	}
-	if qs.Scope != "" {
-		ctxParams.Set("scope", qs.Scope)
-	}
 	if offset > 0 {
 		ctxParams.Set("offset", strconv.Itoa(offset))
 	}
 	ctxQuery := ctxParams.Encode()
-
-	// Scope toggle links preserve other filters but reset pagination and
-	// switch the scope param.
-	scopeMineParams := url.Values{}
-	scopeAllParams := url.Values{}
-	for _, p := range []url.Values{scopeMineParams, scopeAllParams} {
-		if qs.Location != "" {
-			p.Set("location", qs.Location)
-		}
-		if qs.Tag != "" {
-			p.Set("tag", qs.Tag)
-		}
-		if qs.After != "" {
-			p.Set("after", qs.After)
-		}
-		if qs.Before != "" {
-			p.Set("before", qs.Before)
-		}
-	}
-	scopeAllParams.Set("scope", "all")
 
 	var prevPage, nextPage string
 	if offset > 0 {
@@ -137,26 +125,22 @@ func (s *Server) handleGrid(w http.ResponseWriter, r *http.Request) {
 
 	s.render(w, r, "grid.html", struct {
 		baseData
-		Photos         []*photo.Photo
-		Total          int
-		Query          queryState
-		CtxQuery       template.URL
-		PrevPage       string
-		NextPage       string
-		PageInfo       string
-		ScopeMineQuery template.URL
-		ScopeAllQuery  template.URL
+		Photos   []*photo.Photo
+		Total    int
+		Query    queryState
+		CtxQuery template.URL
+		PrevPage string
+		NextPage string
+		PageInfo string
 	}{
-		baseData:       s.newBase(r, "grid"),
-		Photos:         photos,
-		Total:          total,
-		Query:          qs,
-		CtxQuery:       template.URL(ctxQuery),
-		PrevPage:       prevPage,
-		NextPage:       nextPage,
-		PageInfo:       pageInfo(offset, pageSize, total),
-		ScopeMineQuery: template.URL(scopeMineParams.Encode()),
-		ScopeAllQuery:  template.URL(scopeAllParams.Encode()),
+		baseData: s.newBase(r, "grid"),
+		Photos:   photos,
+		Total:    total,
+		Query:    qs,
+		CtxQuery: template.URL(ctxQuery),
+		PrevPage: prevPage,
+		NextPage: nextPage,
+		PageInfo: pageInfo(offset, pageSize, total),
 	})
 }
 
@@ -179,7 +163,7 @@ func (s *Server) handlePhotoDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID, authed := s.authenticatedUserID(r)
-	if !p.Published && !authed {
+	if !p.IsVisibleTo(userID, p.UserID, s.HouseholdMode) {
 		s.renderNotFound(w, r)
 		return
 	}
@@ -208,6 +192,8 @@ func (s *Server) handlePhotoDetail(w http.ResponseWriter, r *http.Request) {
 		PhotoPublicURL string
 		IsOwner        bool
 		CurrentURL     string
+		ShareURL       string
+		Visibility     string
 	}{
 		baseData:       s.newBase(r, "detail"),
 		Photo:          p,
@@ -218,6 +204,8 @@ func (s *Server) handlePhotoDetail(w http.ResponseWriter, r *http.Request) {
 		PhotoPublicURL: s.publicURL(r) + "/p/" + p.ID.String(),
 		IsOwner:        isOwner,
 		CurrentURL:     r.URL.RequestURI(),
+		ShareURL:       shareURL(s.publicURL(r), p),
+		Visibility:     string(p.Visibility),
 	})
 }
 
@@ -251,15 +239,13 @@ func (s *Server) adjacentInGrid(r *http.Request, currentID kid.ID, userID kid.ID
 	offset, _ := strconv.Atoi(q.Get("offset"))
 
 	filter := photo.PhotoFilter{
-		Limit:  pageSize,
-		Offset: offset,
+		Limit:         pageSize,
+		Offset:        offset,
+		HouseholdMode: s.HouseholdMode,
 	}
 	if authed {
 		filter.UserID = userID
-		filter.IncludeOthersPublished = q.Get("scope") == "all"
-	} else {
-		t := true
-		filter.Published = &t
+		filter.ViewerID = userID
 	}
 	if v := q.Get("location"); v != "" {
 		filter.Location = &v
@@ -361,11 +347,11 @@ func (s *Server) adjacentInAlbum(r *http.Request, currentID kid.ID, authed bool,
 		return
 	}
 
-	// Filter unpublished for public visitors.
+	// Filter for public visitors — only published photos.
 	if !authed {
 		var pub []*photo.Photo
 		for _, p := range photos {
-			if p.Published {
+			if p.Visibility == photo.VisibilityPublished {
 				pub = append(pub, p)
 			}
 		}
@@ -578,18 +564,20 @@ func (s *Server) handleUploadPost(w http.ResponseWriter, r *http.Request) {
 
 	safeFilename := filepath.Base(header.Filename)
 
-	// "published" checkbox: if checked, the form sends "on"; if unchecked,
-	// the field is absent entirely. Fall back to server default otherwise.
-	var published bool
-	if r.FormValue("published") != "" {
-		published = true
-	} else {
-		published = s.PublishDefault
+	// Determine visibility from form select, falling back to server default.
+	// RAW files are always private regardless.
+	visibility := photo.Visibility(r.FormValue("visibility"))
+	if !visibility.IsValid() {
+		if s.HouseholdMode {
+			visibility = photo.VisibilityHousehold
+		} else {
+			visibility = photo.VisibilityPrivate
+		}
 	}
 
 	opts := photo.ImportOptions{
-		UserID:    userID,
-		Published: published,
+		UserID:     userID,
+		Visibility: visibility,
 	}
 
 	result := s.Importer.ImportReader(r.Context(), file, safeFilename, opts)
@@ -602,16 +590,15 @@ func (s *Server) handleUploadPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If publishDefault is true but the file turned out to be RAW, correct it
-	// — RAW files are never published by default.
-	if result.Photo.IsRaw && published && r.FormValue("published") == "" {
-		f := false
+	// RAW files are always private regardless of requested visibility.
+	if result.Photo.IsRaw && result.Photo.Visibility != photo.VisibilityPrivate {
+		priv := photo.VisibilityPrivate
 		if _, err := s.PhotoService.UpdatePhoto(r.Context(), result.Photo.ID, photo.PhotoUpdate{
-			Published: &f,
+			Visibility: &priv,
 		}); err != nil {
-			log.Printf("correct RAW published flag for %s: %v", result.Photo.ID, err)
+			log.Printf("correct RAW visibility for %s: %v", result.Photo.ID, err)
 		}
-		result.Photo.Published = false
+		result.Photo.Visibility = photo.VisibilityPrivate
 	}
 
 	s.render(w, r, "upload.html", uploadFormData{
@@ -620,15 +607,12 @@ func (s *Server) handleUploadPost(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleSetPublished toggles a photo's published state from the detail page.
-// Owner only — verifies the authenticated user owns the photo before updating.
+// handleSetVisibility updates a photo's visibility from the detail page.
+// Owner only. Accepts a "visibility" form field (private|household|published)
+// and redirects back to the photo page preserving navigation context.
 //
-//	POST /photo/{id}/publish
-//
-// Redirects back to the photo detail page (preserving any ctx query params
-// via the Referer-independent approach of reading "next" from the form, or
-// falling back to the plain detail URL).
-func (s *Server) handleSetPublished(w http.ResponseWriter, r *http.Request) {
+//	POST /photo/{id}/visibility
+func (s *Server) handleSetVisibility(w http.ResponseWriter, r *http.Request) {
 	userID, _ := s.authenticatedUserID(r) // guaranteed by requireAuth
 
 	raw := r.PathValue("id")
@@ -648,7 +632,7 @@ func (s *Server) handleSetPublished(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.UserID != userID {
-		s.renderNotFound(w, r) // don't reveal existence of other users' photos
+		s.renderNotFound(w, r)
 		return
 	}
 
@@ -657,15 +641,84 @@ func (s *Server) handleSetPublished(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	published := r.FormValue("published") == "true"
+	v := photo.Visibility(r.FormValue("visibility"))
+	if !v.IsValid() {
+		http.Error(w, "invalid visibility", http.StatusBadRequest)
+		return
+	}
 	if _, err := s.PhotoService.UpdatePhoto(r.Context(), id, photo.PhotoUpdate{
-		Published: &published,
+		Visibility: &v,
 	}); err != nil {
 		s.renderServerError(w, r, err)
 		return
 	}
 
-	// Redirect back to the detail page, preserving navigation context.
+	dest := "/photo/" + raw
+	if next := r.FormValue("next"); next != "" {
+		dest = next
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
+// handleGeneratePhotoShareToken generates a share token for a photo from
+// the web UI and redirects back to the detail page.
+//
+//	POST /photo/{id}/share
+func (s *Server) handleGeneratePhotoShareToken(w http.ResponseWriter, r *http.Request) {
+	userID, _ := s.authenticatedUserID(r)
+
+	raw := r.PathValue("id")
+	id, err := kid.FromString(raw)
+	if err != nil {
+		s.renderNotFound(w, r)
+		return
+	}
+	p, err := s.PhotoService.FindPhotoByID(r.Context(), id)
+	if err != nil {
+		s.renderNotFound(w, r)
+		return
+	}
+	if p.UserID != userID {
+		s.renderNotFound(w, r)
+		return
+	}
+	if _, err := s.PhotoService.GenerateShareToken(r.Context(), id); err != nil {
+		s.renderServerError(w, r, err)
+		return
+	}
+	dest := "/photo/" + raw
+	if next := r.FormValue("next"); next != "" {
+		dest = next
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
+// handleRevokePhotoShareToken clears the share token for a photo.
+//
+//	POST /photo/{id}/share/revoke
+func (s *Server) handleRevokePhotoShareToken(w http.ResponseWriter, r *http.Request) {
+	userID, _ := s.authenticatedUserID(r)
+
+	raw := r.PathValue("id")
+	id, err := kid.FromString(raw)
+	if err != nil {
+		s.renderNotFound(w, r)
+		return
+	}
+	p, err := s.PhotoService.FindPhotoByID(r.Context(), id)
+	if err != nil {
+		s.renderNotFound(w, r)
+		return
+	}
+	if p.UserID != userID {
+		s.renderNotFound(w, r)
+		return
+	}
+	empty := ""
+	if _, err := s.PhotoService.UpdatePhoto(r.Context(), id, photo.PhotoUpdate{ShareToken: &empty}); err != nil {
+		s.renderServerError(w, r, err)
+		return
+	}
 	dest := "/photo/" + raw
 	if next := r.FormValue("next"); next != "" {
 		dest = next

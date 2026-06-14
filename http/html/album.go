@@ -13,9 +13,13 @@ import (
 func (s *Server) handleAlbumList(w http.ResponseWriter, r *http.Request) {
 	userID, authed := s.authenticatedUserID(r)
 
-	filter := photo.AlbumFilter{Limit: 200}
+	filter := photo.AlbumFilter{
+		Limit:         200,
+		HouseholdMode: s.HouseholdMode,
+	}
 	if authed {
 		filter.UserID = userID
+		filter.ViewerID = userID
 	}
 
 	albums, _, err := s.AlbumService.FindAlbums(r.Context(), filter)
@@ -52,7 +56,7 @@ func (s *Server) filterPublicAlbums(r *http.Request, albums []*photo.Album) []*p
 		}
 		count := 0
 		for _, p := range all {
-			if p.Published {
+			if p.Visibility == photo.VisibilityPublished {
 				count++
 			}
 		}
@@ -98,18 +102,16 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For unauthenticated visitors filter out unpublished photos and
-	// correct the count so the UI doesn't show empty slots or wrong numbers.
+	// For unauthenticated visitors filter out non-published photos.
 	if !authed {
 		var pub []*photo.Photo
 		for _, p := range photos {
-			if p.Published {
+			if p.Visibility == photo.VisibilityPublished {
 				pub = append(pub, p)
 			}
 		}
 		photos = pub
 		total = len(pub)
-		// If no published photos at all, return 404.
 		if total == 0 {
 			s.renderNotFound(w, r)
 			return
@@ -183,13 +185,10 @@ func (s *Server) handleAlbumCover(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !p.Published {
+	if p.Visibility != photo.VisibilityPublished {
 		http.NotFound(w, r)
 		return
 	}
 
-	// Delegate to the existing public thumb handler by setting the path
-	// value it expects and calling it directly.
-	r.SetPathValue("id", p.ID.String())
-	s.handlePublicThumb(w, r)
+	s.servePhotoThumb(w, r, p)
 }

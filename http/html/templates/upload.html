@@ -25,11 +25,28 @@
       </div>
 
       <div class="form-field">
-        <label class="form-checkbox-label">
-          <input type="checkbox" id="published" name="published">
-          Publish immediately (visible to everyone, including logged-out visitors)
-        </label>
-        <p class="text-muted">RAW files are never published automatically, regardless of this setting.</p>
+        <label>Visibility</label>
+        <div class="visibility-selector">
+          <label class="visibility-option">
+            <input type="radio" name="visibility" value="private">
+            <span class="vis-icon">🔒</span>
+            <span class="vis-label">Private</span>
+            <span class="vis-desc">Only you</span>
+          </label>
+          <label class="visibility-option selected">
+            <input type="radio" name="visibility" value="household" checked>
+            <span class="vis-icon">👥</span>
+            <span class="vis-label">Household</span>
+            <span class="vis-desc">All users</span>
+          </label>
+          <label class="visibility-option">
+            <input type="radio" name="visibility" value="published">
+            <span class="vis-icon">🌐</span>
+            <span class="vis-label">Published</span>
+            <span class="vis-desc">Everyone</span>
+          </label>
+        </div>
+        <p class="text-muted">RAW files are always private regardless of this setting.</p>
       </div>
 
       <button type="submit" class="btn btn-primary">Upload</button>
@@ -38,3 +55,16 @@
   </div>
 </div>
 {{end}}
+
+<script>
+(function () {
+  document.querySelectorAll('.visibility-selector input[type="radio"]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      document.querySelectorAll('.visibility-option').forEach(function (opt) {
+        opt.classList.remove('selected');
+      });
+      radio.closest('.visibility-option').classList.add('selected');
+    });
+  });
+})();
+</script>

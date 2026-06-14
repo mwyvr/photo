@@ -14,6 +14,8 @@ type LibraryStatus struct {
 	TotalPhotos    int `json:"totalPhotos"`
 	TotalRAW       int `json:"totalRaw"`
 	TotalNonRAW    int `json:"totalNonRaw"`
+	TotalPrivate   int `json:"totalPrivate"`
+	TotalHousehold int `json:"totalHousehold"`
 	TotalPublished int `json:"totalPublished"`
 
 	// Storage.

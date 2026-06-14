@@ -33,21 +33,25 @@ func (s *StatusService) LibraryStatus(ctx context.Context, userID *kid.ID) (*pho
 	// Photo counts and storage in one pass.
 	err = tx.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT
-			COUNT(*)                                      AS total,
-			COALESCE(SUM(CASE WHEN is_raw = 1 THEN 1 ELSE 0 END), 0)       AS total_raw,
-			COALESCE(SUM(CASE WHEN is_raw = 0 THEN 1 ELSE 0 END), 0)       AS total_non_raw,
-			COALESCE(SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END), 0)    AS total_published,
-			COALESCE(SUM(file_size_bytes), 0)             AS total_bytes,
-			COALESCE(SUM(CASE WHEN location_name != '' THEN 1 ELSE 0 END), 0) AS with_location,
-			COALESCE(SUM(CASE WHEN location_name = ''  THEN 1 ELSE 0 END), 0) AS without_location,
-			COALESCE(SUM(CASE WHEN gps_lat IS NOT NULL THEN 1 ELSE 0 END), 0) AS with_gps,
-			COALESCE(SUM(CASE WHEN description != '' THEN 1 ELSE 0 END), 0)   AS with_description
+			COUNT(*)                                                              AS total,
+			COALESCE(SUM(CASE WHEN is_raw = 1 THEN 1 ELSE 0 END), 0)            AS total_raw,
+			COALESCE(SUM(CASE WHEN is_raw = 0 THEN 1 ELSE 0 END), 0)            AS total_non_raw,
+			COALESCE(SUM(CASE WHEN visibility = 'private'   THEN 1 ELSE 0 END), 0) AS total_private,
+			COALESCE(SUM(CASE WHEN visibility = 'household' THEN 1 ELSE 0 END), 0) AS total_household,
+			COALESCE(SUM(CASE WHEN visibility = 'published' THEN 1 ELSE 0 END), 0) AS total_published,
+			COALESCE(SUM(file_size_bytes), 0)                                    AS total_bytes,
+			COALESCE(SUM(CASE WHEN location_name != '' THEN 1 ELSE 0 END), 0)   AS with_location,
+			COALESCE(SUM(CASE WHEN location_name = ''  THEN 1 ELSE 0 END), 0)   AS without_location,
+			COALESCE(SUM(CASE WHEN gps_lat IS NOT NULL THEN 1 ELSE 0 END), 0)   AS with_gps,
+			COALESCE(SUM(CASE WHEN description != '' THEN 1 ELSE 0 END), 0)     AS with_description
 		FROM photos
 		WHERE %s
 	`, where), args...).Scan(
 		&st.TotalPhotos,
 		&st.TotalRAW,
 		&st.TotalNonRAW,
+		&st.TotalPrivate,
+		&st.TotalHousehold,
 		&st.TotalPublished,
 		&st.TotalSizeBytes,
 		&st.WithLocation,

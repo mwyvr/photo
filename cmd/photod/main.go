@@ -106,6 +106,7 @@ func run(ctx context.Context) error {
 	srv.JWTSecret = cfg.JWTSecret
 	srv.LibraryRoot = cfg.LibraryRoot
 	srv.PublishDefault = cfg.PublishDefault
+	srv.HouseholdMode = cfg.HouseholdMode
 	srv.TrustedProxy = cfg.TrustedProxy
 
 	// Build and register HTML UI.
@@ -126,12 +127,14 @@ func run(ctx context.Context) error {
 	ui.LibraryRoot = cfg.LibraryRoot
 	ui.TrustedProxy = cfg.TrustedProxy
 	ui.PublicBaseURL = cfg.PublicBaseURL
+	ui.HouseholdMode = cfg.HouseholdMode
 	ui.RegisterRoutes(srv.Router())
 
 	log.Printf("photod config:          %s", cfgPath)
 	log.Printf("photod library:         %s", cfg.LibraryRoot)
 	log.Printf("photod database:        %s", cfg.DBPath())
 	log.Printf("photod publish default: %v (RAW always false)", cfg.PublishDefault)
+	log.Printf("photod household mode:  %v", cfg.HouseholdMode)
 	if cfg.PublicBaseURL != "" {
 		log.Printf("photod public base URL: %s (RSS feed enabled at /feed.xml)", cfg.PublicBaseURL)
 	} else {
@@ -173,6 +176,12 @@ type ServerConfig struct {
 	// e.g. "https://photos.yourdomain.com" (no trailing slash). Used to
 	// build absolute links in the RSS feed. If empty, the feed is disabled.
 	PublicBaseURL string `json:"publicBaseUrl,omitempty"`
+
+	// HouseholdMode, when true, makes household-visibility photos visible
+	// to all authenticated users — suitable for couples or small groups
+	// sharing a library. Newly uploaded photos default to household visibility.
+	// Defaults to true for new installs.
+	HouseholdMode bool `json:"householdMode"`
 
 	// JWTSecret is the decoded form of JWTSecretHex. Not persisted.
 	JWTSecret []byte `json:"-"`
@@ -232,10 +241,11 @@ func initConfig(path string) (*ServerConfig, error) {
 	}
 
 	cfg := &ServerConfig{
-		Addr:         "127.0.0.1:4040",
-		LibraryRoot:  libraryRoot,
-		JWTSecretHex: hex.EncodeToString(secret),
-		JWTSecret:    secret,
+		Addr:          "127.0.0.1:4040",
+		LibraryRoot:   libraryRoot,
+		JWTSecretHex:  hex.EncodeToString(secret),
+		JWTSecret:     secret,
+		HouseholdMode: true,
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

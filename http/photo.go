@@ -46,8 +46,10 @@ func (s *Server) handleListPhotos(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
 	filter := photo.PhotoFilter{
-		UserID: userID,
-		Limit:  50,
+		UserID:        userID,
+		ViewerID:      userID,
+		HouseholdMode: s.HouseholdMode,
+		Limit:         50,
 	}
 
 	if v := q.Get("raw_only"); v == "true" {
@@ -129,23 +131,23 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 	// filepath.Base("../../etc/passwd") → "passwd", preventing traversal.
 	safeFilename := filepath.Base(header.Filename)
 
-	// Determine published state:
-	// - If ?published= is explicitly set, use that value.
-	// - Otherwise apply server default — but RAW files are always unpublished.
-	var published bool
+	// Determine visibility:
+	// - If ?visibility= is explicitly set, use that value.
+	// - Otherwise: RAW files are always private; rendered files use server default.
 	q := r.URL.Query()
-	if p := q.Get("published"); p != "" {
-		published = p == "true"
+	var visibility photo.Visibility
+	if v := q.Get("visibility"); photo.Visibility(v).IsValid() {
+		visibility = photo.Visibility(v)
+	} else if s.HouseholdMode {
+		visibility = photo.VisibilityHousehold
 	} else {
-		published = s.PublishDefault
-		// RAW default override is applied after import once we know IsRaw.
-		// Flag it for post-import correction.
+		visibility = photo.VisibilityPrivate
 	}
 
 	opts := photo.ImportOptions{
-		UserID:    userID,
-		RawOnly:   q.Get("raw_only") == "true",
-		Published: published,
+		UserID:     userID,
+		RawOnly:    q.Get("raw_only") == "true",
+		Visibility: visibility,
 	}
 
 	result := s.Importer.ImportReader(r.Context(), file, safeFilename, opts)
@@ -158,16 +160,15 @@ func (s *Server) handleUploadPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If publishDefault is true but the file turned out to be RAW, correct it.
-	// We can't know IsRaw before extraction, so we fix it after the fact.
-	if result.Photo.IsRaw && published && q.Get("published") == "" {
-		f := false
+	// RAW files are always private regardless of requested visibility.
+	if result.Photo.IsRaw && result.Photo.Visibility != photo.VisibilityPrivate {
+		priv := photo.VisibilityPrivate
 		if _, err := s.PhotoService.UpdatePhoto(r.Context(), result.Photo.ID, photo.PhotoUpdate{
-			Published: &f,
+			Visibility: &priv,
 		}); err != nil {
-			log.Printf("correct RAW published flag for %s: %v", result.Photo.ID, err)
+			log.Printf("correct RAW visibility for %s: %v", result.Photo.ID, err)
 		}
-		result.Photo.Published = false
+		result.Photo.Visibility = photo.VisibilityPrivate
 	}
 
 	respond(w, http.StatusCreated, result.Photo)
@@ -257,19 +258,23 @@ func (s *Server) handleUpdatePhoto(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Description  *string `json:"description"`
-		LocationName *string `json:"locationName"`
-		Published    *bool   `json:"published"`
+		Description  *string            `json:"description"`
+		LocationName *string            `json:"locationName"`
+		Visibility   *photo.Visibility  `json:"visibility"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondError(w, photo.Errorf(photo.EINVALID, "invalid request body"))
+		return
+	}
+	if body.Visibility != nil && !body.Visibility.IsValid() {
+		respondError(w, photo.Errorf(photo.EINVALID, "invalid visibility value"))
 		return
 	}
 
 	updated, err := s.PhotoService.UpdatePhoto(r.Context(), id, photo.PhotoUpdate{
 		Description:  body.Description,
 		LocationName: body.LocationName,
-		Published:    body.Published,
+		Visibility:   body.Visibility,
 	})
 	if err != nil {
 		respondError(w, err)
@@ -484,4 +489,56 @@ func (s *Server) handleDetachTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusNoContent, nil)
+}
+
+// handleGeneratePhotoShareToken creates or replaces the share token on a photo.
+//
+//	POST /api/v1/photos/{id}/share
+func (s *Server) handleGeneratePhotoShareToken(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
+		return
+	}
+	userID := userIDFromContext(r.Context())
+	p, err := s.PhotoService.FindPhotoByID(r.Context(), id)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if p.UserID != userID {
+		respondError(w, photo.Errorf(photo.EFORBIDDEN, "access denied"))
+		return
+	}
+	token, err := s.PhotoService.GenerateShareToken(r.Context(), id)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	respond(w, http.StatusOK, map[string]string{"token": token})
+}
+
+// handleRevokePhotoShareToken clears the share token on a photo.
+//
+//	DELETE /api/v1/photos/{id}/share
+func (s *Server) handleRevokePhotoShareToken(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
+		return
+	}
+	userID := userIDFromContext(r.Context())
+	p, err := s.PhotoService.FindPhotoByID(r.Context(), id)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if p.UserID != userID {
+		respondError(w, photo.Errorf(photo.EFORBIDDEN, "access denied"))
+		return
+	}
+	empty := ""
+	if _, err := s.PhotoService.UpdatePhoto(r.Context(), id, photo.PhotoUpdate{ShareToken: &empty}); err != nil {
+		respondError(w, err)
+		return
+	}
+	respond(w, http.StatusOK, map[string]string{"status": "revoked"})
 }

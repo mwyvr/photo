@@ -12,7 +12,7 @@ func runUpdate(ctx context.Context, c *client, args []string) error {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 	description := fs.String("description", "", "set the photo description")
 	location := fs.String("location", "", "set the location name manually")
-	published := fs.String("published", "", "set publish status: true or false")
+	visibility := fs.String("visibility", "", "set visibility: private, household, or published")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `Usage: photo update [flags] <photo-id>
 
@@ -35,26 +35,21 @@ Flags:
 		os.Exit(1)
 	}
 
-	if *description == "" && *location == "" && *published == "" {
-		return fmt.Errorf("at least one field to update is required (--description, --location, --published)")
+	if *description == "" && *location == "" && *visibility == "" {
+		return fmt.Errorf("at least one field to update is required (--description, --location, --visibility)")
 	}
 
-	var publishedPtr *bool
-	if *published != "" {
-		switch *published {
-		case "true":
-			b := true
-			publishedPtr = &b
-		case "false":
-			b := false
-			publishedPtr = &b
+	if *visibility != "" {
+		switch *visibility {
+		case "private", "household", "published":
+			// valid
 		default:
-			return fmt.Errorf("--published must be \"true\" or \"false\", got %q", *published)
+			return fmt.Errorf("--visibility must be \"private\", \"household\", or \"published\", got %q", *visibility)
 		}
 	}
 
 	id := fs.Arg(0)
-	p, err := c.updatePhoto(ctx, id, *description, *location, publishedPtr)
+	p, err := c.updatePhoto(ctx, id, *description, *location, *visibility)
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
@@ -64,10 +59,10 @@ Flags:
 		fmt.Printf("  Description: %s\n", p.Description)
 	}
 	if *location != "" {
-		fmt.Printf("  Location: %s\n", p.LocationName)
+		fmt.Printf("  Location:    %s\n", p.LocationName)
 	}
-	if publishedPtr != nil {
-		fmt.Printf("  Published: %v\n", p.Published)
+	if *visibility != "" {
+		fmt.Printf("  Visibility:  %s\n", p.Visibility)
 	}
 	return nil
 }

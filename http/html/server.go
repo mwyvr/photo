@@ -69,6 +69,10 @@ type Server struct {
 	// If empty, /feed.xml returns 404.
 	PublicBaseURL string
 
+	// HouseholdMode makes household-visibility photos and albums visible to
+	// all authenticated users.
+	HouseholdMode bool
+
 	// authLimiter rate-limits failed web UI login attempts per IP.
 	authLimiter *htmlRateLimiter
 }
@@ -179,8 +183,12 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// Public photo/thumb serving.
 	mux.HandleFunc("GET /p/{id}", s.handlePublicPhoto)
 	mux.HandleFunc("GET /p/{id}/thumb", s.handlePublicThumb)
+	mux.HandleFunc("GET /s/{token}", s.handleSharedPhotoOrThumb)
+	mux.HandleFunc("GET /sa/{token}", s.handleSharedAlbum)
 	mux.HandleFunc("GET /photo/{id}", s.handlePhotoDetail)
-	mux.HandleFunc("POST /photo/{id}/publish", s.requireAuth(s.handleSetPublished))
+	mux.HandleFunc("POST /photo/{id}/visibility", s.requireAuth(s.handleSetVisibility))
+	mux.HandleFunc("POST /photo/{id}/share", s.requireAuth(s.handleGeneratePhotoShareToken))
+	mux.HandleFunc("POST /photo/{id}/share/revoke", s.requireAuth(s.handleRevokePhotoShareToken))
 	mux.HandleFunc("GET /photo/{id}/file", s.handlePrivatePhotoFile)
 	mux.HandleFunc("GET /photo/{id}/thumb", s.handlePrivateThumb)
 	mux.HandleFunc("GET /photo/{id}/preview", s.handlePrivatePreview)
@@ -245,6 +253,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 	funcMap := template.FuncMap{
 		"formatBytes": formatBytes,
 		"deref":       func(f *float64) float64 { return *f },
+		"visStr":      func(v photo.Visibility) string { return string(v) },
 	}
 	tmpl, err := template.New("").Funcs(funcMap).ParseFS(assets,
 		"templates/base.html",

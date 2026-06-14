@@ -56,10 +56,9 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	published := true
 	photos, _, err := s.PhotoService.FindPhotos(r.Context(), photo.PhotoFilter{
-		Published: &published,
-		Limit:     feedItemLimit,
+		// Feed shows published photos only — no ViewerID so visibility = published.
+		Limit: feedItemLimit,
 	})
 	if err != nil {
 		s.renderServerError(w, r, err)

@@ -22,7 +22,7 @@
 <div class="detail-layout">
 
   <div class="detail-image-wrap">
-    {{if .Photo.Published}}
+    {{if eq .Visibility "published"}}
     <img src="/p/{{.Photo.ID}}"
          alt="{{if .Photo.LocationName}}{{.Photo.LocationName}}{{else}}{{.Photo.Filename}}{{end}}"
          class="detail-img"
@@ -55,7 +55,7 @@
         <span class="meta-label">Size</span>
         <span class="meta-value">{{formatBytes .Photo.FileSizeBytes}}</span>
       </div>
-      {{if .Photo.Published}}
+      {{if eq .Visibility "published"}}
       <div class="meta-row">
         <span class="meta-label">Status</span>
         <span class="meta-value text-success">Published</span>
@@ -155,7 +155,36 @@
     </div>
     {{end}}
 
-    {{if .Photo.Published}}
+    {{if .IsOwner}}
+    <div class="meta-section">
+      <h2 class="meta-section-title">Visibility</h2>
+      <form method="POST" action="/photo/{{.Photo.ID}}/visibility">
+        <input type="hidden" name="next" value="{{.CurrentURL}}">
+        <div class="visibility-selector">
+          <label class="visibility-option{{if eq .Visibility "private"}} selected{{end}}">
+            <input type="radio" name="visibility" value="private"{{if eq .Visibility "private"}} checked{{end}} onchange="this.form.submit()">
+            <span class="vis-icon">🔒</span>
+            <span class="vis-label">Private</span>
+            <span class="vis-desc">Only you</span>
+          </label>
+          <label class="visibility-option{{if eq .Visibility "household"}} selected{{end}}">
+            <input type="radio" name="visibility" value="household"{{if eq .Visibility "household"}} checked{{end}} onchange="this.form.submit()">
+            <span class="vis-icon">👥</span>
+            <span class="vis-label">Household</span>
+            <span class="vis-desc">All users</span>
+          </label>
+          <label class="visibility-option{{if eq .Visibility "published"}} selected{{end}}">
+            <input type="radio" name="visibility" value="published"{{if eq .Visibility "published"}} checked{{end}} onchange="this.form.submit()">
+            <span class="vis-icon">🌐</span>
+            <span class="vis-label">Published</span>
+            <span class="vis-desc">Everyone</span>
+          </label>
+        </div>
+      </form>
+    </div>
+    {{end}}
+
+    {{if eq .Visibility "published"}}
     <div class="meta-section">
       <h2 class="meta-section-title">Share</h2>
       <div class="meta-row">
@@ -176,23 +205,40 @@
           </button>
         </span>
       </div>
-      {{if .IsOwner}}
-      <form method="POST" action="/photo/{{.Photo.ID}}/publish" class="mt-sm">
-        <input type="hidden" name="published" value="false">
+    </div>
+    {{end}}
+
+    {{if .IsOwner}}
+    <div class="meta-section">
+      <h2 class="meta-section-title">Share link</h2>
+      {{if .Photo.ShareToken}}
+      <div class="meta-row">
+        <span class="meta-label">Link</span>
+        <span class="meta-value share-value">
+          <code><a href="{{.ShareURL}}" target="_blank" rel="noopener">{{.ShareURL}}</a></code>
+          <button type="button" class="copy-btn" data-copy="{{.ShareURL}}" aria-label="Copy share link" title="Copy share link">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          </button>
+        </span>
+      </div>
+      <p class="text-muted">Anyone with this link can view this photo without logging in.</p>
+      <div style="display:flex;gap:var(--space-sm);margin-top:var(--space-sm)">
+        <form method="POST" action="/photo/{{.Photo.ID}}/share" style="margin:0">
+          <input type="hidden" name="next" value="{{.CurrentURL}}">
+          <button type="submit" class="btn btn-ghost">↻ New link</button>
+        </form>
+        <form method="POST" action="/photo/{{.Photo.ID}}/share/revoke" style="margin:0">
+          <input type="hidden" name="next" value="{{.CurrentURL}}">
+          <button type="submit" class="btn btn-ghost">✕ Revoke</button>
+        </form>
+      </div>
+      {{else}}
+      <p class="text-muted">Generate a private link to share this photo with anyone, without making it public.</p>
+      <form method="POST" action="/photo/{{.Photo.ID}}/share" style="margin-top:var(--space-sm)">
         <input type="hidden" name="next" value="{{.CurrentURL}}">
-        <button type="submit" class="btn btn-ghost">Unpublish</button>
+        <button type="submit" class="btn btn-primary">Get share link</button>
       </form>
       {{end}}
-    </div>
-    {{else if .IsOwner}}
-    <div class="meta-section">
-      <h2 class="meta-section-title">Share</h2>
-      <p class="text-muted">This photo is private. Publish it to get a shareable link and Hugo shortcode.</p>
-      <form method="POST" action="/photo/{{.Photo.ID}}/publish" class="mt-sm">
-        <input type="hidden" name="published" value="true">
-        <input type="hidden" name="next" value="{{.CurrentURL}}">
-        <button type="submit" class="btn btn-primary">Publish</button>
-      </form>
     </div>
     {{end}}
 
@@ -251,6 +297,18 @@
         if (next) window.location = next.href;
       }
     }
+  });
+})();
+
+// Visibility selector — update .selected class on change before form submits.
+(function () {
+  document.querySelectorAll('.visibility-selector input[type="radio"]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      document.querySelectorAll('.visibility-option').forEach(function (opt) {
+        opt.classList.remove('selected');
+      });
+      radio.closest('.visibility-option').classList.add('selected');
+    });
   });
 })();
 

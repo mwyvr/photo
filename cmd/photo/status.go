@@ -34,6 +34,8 @@ func printStatus(st *statusJSON) error {
 	fmt.Fprintf(w, "Total:\t%d\n", st.TotalPhotos)
 	fmt.Fprintf(w, "RAW:\t%d\n", st.TotalRAW)
 	fmt.Fprintf(w, "Non-RAW:\t%d\n", st.TotalNonRAW)
+	fmt.Fprintf(w, "Private:\t%d\n", st.TotalPrivate)
+	fmt.Fprintf(w, "Household:\t%d\n", st.TotalHousehold)
 	fmt.Fprintf(w, "Published:\t%d\n", st.TotalPublished)
 	fmt.Fprintf(w, "Total size:\t%s\n", formatBytes(int64(st.TotalSizeBytes)))
 
@@ -67,6 +69,8 @@ type statusJSON struct {
 	TotalPhotos      int        `json:"totalPhotos"`
 	TotalRAW         int        `json:"totalRaw"`
 	TotalNonRAW      int        `json:"totalNonRaw"`
+	TotalPrivate     int        `json:"totalPrivate"`
+	TotalHousehold   int        `json:"totalHousehold"`
 	TotalPublished   int        `json:"totalPublished"`
 	TotalSizeBytes   int64      `json:"totalSizeBytes"`
 	WithLocation     int        `json:"withLocation"`

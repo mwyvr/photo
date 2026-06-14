@@ -105,7 +105,7 @@ type photoJSON struct {
 	CapturedAt    *time.Time `json:"capturedAt"`
 	LocationName  string     `json:"locationName"`
 	IsRaw         bool       `json:"isRaw"`
-	Published     bool       `json:"published"`
+	Visibility    string     `json:"visibility"`
 	Tags          []tagJSON  `json:"tags"`
 	Description   string     `json:"description"`
 	EXIFRaw       string     `json:"exifRaw,omitempty"`
@@ -188,13 +188,13 @@ func (c *client) checkExists(ctx context.Context, sha256 string) (bool, string, 
 }
 
 func (c *client) uploadPhoto(ctx context.Context, filePath string, rawOnly bool) (*photoJSON, error) {
-	return c.uploadPhotoOpts(ctx, filePath, rawOnly, false, nil)
+	return c.uploadPhotoOpts(ctx, filePath, rawOnly, "", nil)
 }
 
 // uploadPhotoOpts is the full upload implementation used by both add and publish.
-// published=true marks the photo as publicly visible.
+// visibility sets the photo's visibility (private|household|published); empty = server default.
 // tags are attached after upload if non-empty.
-func (c *client) uploadPhotoOpts(ctx context.Context, filePath string, rawOnly, published bool, tags []string) (*photoJSON, error) {
+func (c *client) uploadPhotoOpts(ctx context.Context, filePath string, rawOnly bool, visibility string, tags []string) (*photoJSON, error) {
 	// Pre-flight: compute SHA-256 and check if already in library.
 	sha256, err := hashFileHex(filePath)
 	if err != nil {
@@ -230,8 +230,8 @@ func (c *client) uploadPhotoOpts(ctx context.Context, filePath string, rawOnly, 
 	if rawOnly {
 		params.Set("raw_only", "true")
 	}
-	if published {
-		params.Set("published", "true")
+	if visibility != "" {
+		params.Set("visibility", visibility)
 	}
 	if len(params) > 0 {
 		uploadURL += "?" + params.Encode()
@@ -302,6 +302,21 @@ func (c *client) getStatus(ctx context.Context) (*statusJSON, error) {
 	return &st, nil
 }
 
+func (c *client) generatePhotoShare(ctx context.Context, id string) (string, error) {
+	var result struct {
+		Token string `json:"token"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/photos/"+id+"/share", nil, &result); err != nil {
+		return "", err
+	}
+	return result.Token, nil
+}
+
+func (c *client) revokePhotoShare(ctx context.Context, id string) error {
+	var result interface{}
+	return c.do(ctx, http.MethodDelete, "/api/v1/photos/"+id+"/share", nil, &result)
+}
+
 func (c *client) getAdminStatus(ctx context.Context) (*statusJSON, error) {
 	var st statusJSON
 	if err := c.do(ctx, http.MethodGet, "/api/v1/admin/status", nil, &st); err != nil {
@@ -319,7 +334,7 @@ func (c *client) getPhoto(ctx context.Context, id string) (*photoJSON, error) {
 	return &p, nil
 }
 
-func (c *client) updatePhoto(ctx context.Context, id, description, location string, published *bool) (*photoJSON, error) {
+func (c *client) updatePhoto(ctx context.Context, id, description, location, visibility string) (*photoJSON, error) {
 	body := map[string]interface{}{}
 	if description != "" {
 		body["description"] = description
@@ -327,8 +342,8 @@ func (c *client) updatePhoto(ctx context.Context, id, description, location stri
 	if location != "" {
 		body["locationName"] = location
 	}
-	if published != nil {
-		body["published"] = *published
+	if visibility != "" {
+		body["visibility"] = visibility
 	}
 	var p photoJSON
 	if err := c.do(ctx, http.MethodPatch, "/api/v1/photos/"+id, body, &p); err != nil {

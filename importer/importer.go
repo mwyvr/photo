@@ -224,7 +224,7 @@ func (imp *Importer) runPipeline(ctx context.Context, in pipelineInput, opts pho
 		MIMEType:      in.exif.MIMEType,
 		FileSizeBytes: in.size,
 		IsRaw:         in.exif.IsRaw,
-		Published:     opts.Published,
+		Visibility:    opts.Visibility,
 		CameraMake:    in.exif.Make,
 		CameraModel:   in.exif.Model,
 		LensModel:     in.exif.LensModel,

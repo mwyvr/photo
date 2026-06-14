@@ -96,9 +96,50 @@ func (s *PhotoService) UpdatePhoto(ctx context.Context, id kid.ID, upd photo.Pho
 	if upd.Description != nil {
 		p.Description = *upd.Description
 	}
+	if upd.LocationName != nil {
+		p.LocationName = *upd.LocationName
+	}
+	if upd.Visibility != nil {
+		p.Visibility = *upd.Visibility
+	}
+	if upd.ShareToken != nil {
+		if *upd.ShareToken == "" {
+			p.ShareToken = nil
+		} else {
+			t := *upd.ShareToken
+			p.ShareToken = &t
+		}
+	}
+	if upd.ThumbPath != nil {
+		p.ThumbPath = upd.ThumbPath
+	}
 	p.UpdatedAt = time.Now()
 	cp := *p
 	return &cp, nil
+}
+
+func (s *PhotoService) FindPhotoByShareToken(ctx context.Context, token string) (*photo.Photo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.photos {
+		if p.ShareToken != nil && *p.ShareToken == token {
+			cp := *p
+			return &cp, nil
+		}
+	}
+	return nil, photo.Errorf(photo.ENOTFOUND, "photo not found")
+}
+
+func (s *PhotoService) GenerateShareToken(ctx context.Context, id kid.ID) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.photos[id]
+	if !ok {
+		return "", photo.Errorf(photo.ENOTFOUND, "photo not found: %s", id)
+	}
+	token := kid.New().String() // use kid as a random token in tests
+	p.ShareToken = &token
+	return token, nil
 }
 
 func (s *PhotoService) DeletePhoto(ctx context.Context, id kid.ID) error {
@@ -432,6 +473,30 @@ func (s *AlbumService) FindAlbumByID(ctx context.Context, id kid.ID) (*photo.Alb
 	}
 	cp := *a
 	return &cp, nil
+}
+
+func (s *AlbumService) FindAlbumByShareToken(ctx context.Context, token string) (*photo.Album, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, a := range s.albums {
+		if a.ShareToken != nil && *a.ShareToken == token {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, photo.Errorf(photo.ENOTFOUND, "album not found")
+}
+
+func (s *AlbumService) GenerateShareToken(ctx context.Context, id kid.ID) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.albums[id]
+	if !ok {
+		return "", photo.Errorf(photo.ENOTFOUND, "album not found: %s", id)
+	}
+	token := kid.New().String()
+	a.ShareToken = &token
+	return token, nil
 }
 
 func (s *AlbumService) FindAlbums(ctx context.Context, filter photo.AlbumFilter) ([]*photo.Album, int, error) {

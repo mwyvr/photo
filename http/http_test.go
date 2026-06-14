@@ -30,6 +30,7 @@ func testServer(t *testing.T) (*photohttp.Server, *httptest.Server) {
 	srv.BackupService = &mock.BackupService{}
 	srv.InviteService = mock.NewInviteService()
 	srv.LibraryRoot = t.TempDir()
+	srv.HouseholdMode = true
 
 	ts := httptest.NewServer(photohttp.WrapForTest(srv.Router()))
 	t.Cleanup(ts.Close)
